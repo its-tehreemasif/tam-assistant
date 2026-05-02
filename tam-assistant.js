@@ -154,24 +154,29 @@ function getHelp() {
 • _.note clear_ — Delete all notes
 
 ⏰ *Reminders:*
-• _.remind [time] [text]_
-  _Examples:_ .remind 30min Call client
-            .remind 2h Check emails
-            .remind 1h 30min Meeting
+• _.remind [time] [text]_ — Set reminder
+• _.remind list_ — View pending reminders
+• _.remind cancel [#]_ — Cancel a reminder
+  _e.g. .remind 30min Call client_
 
 🌍 *Live Data:*
 • _.weather [city]_ — Current weather anywhere
 • _.time [city]_ — Current time in any timezone
 
 🔧 *Utilities:*
+• _.translate [lang] [text]_ — Translate anything
+• _.calc [expression]_ — Quick math
+• _.qod_ — Quote of the day
 • _.ping_ — Check if bot is alive
 • _.reset_ — Clear your AI chat history
+• _.export_ — Get your full AI chat history
 • _.status_ — Bot uptime & stats
 • _.help_ — Show this guide
 
 🔒 *Owner Commands:*
 • _.ban_ / _.unban_ @user
 • _.banlist_ — View banned users
+• _.keyword list/add/del_ — Manage alert keywords
 • _.stats_ — Detailed statistics
 • _.reset all_ — Clear all conversations
 ━━━━━━━━━━━━━━━━━━━━━
@@ -480,23 +485,51 @@ async function startAssistant() {
             // .remind
             if (textLower.startsWith('.remind')) {
                 const body = text.replace(/^\.remind\s*/i, '').trim();
-                if (!body) {
-                    await reply(sock, msg, `⏰ *Usage:* .remind [time] [text]\n_e.g. .remind 30min Call the client_`);
+
+                // .remind list
+                if (!body || body.toLowerCase() === 'list') {
+                    const all = persistence.getReminders().filter(r => r.userId === participant);
+                    if (all.length === 0) {
+                        await reply(sock, msg, `📋 *No pending reminders.*\n_Use .remind [time] [text] to set one._`);
+                    } else {
+                        const list = all.map((r, i) => {
+                            const fireTime = moment(r.fireAt).tz('Asia/Karachi').format('hh:mm A, DD MMM');
+                            return `${i + 1}. 📌 "${r.text}"\n   🕐 ${fireTime}`;
+                        }).join('\n\n');
+                        await reply(sock, msg, `⏰ *Pending Reminders (${all.length})*\n\n${list}\n\n_Use .remind cancel [#] to cancel one._`);
+                    }
                     return;
                 }
 
-                // Extract time portion (beginning of string until we hit non-time words)
+                // .remind cancel [#]
+                if (body.match(/^cancel\s+\d+/i)) {
+                    const idx = parseInt(body.replace(/^cancel\s+/i, '')) - 1;
+                    const all = persistence.getReminders().filter(r => r.userId === participant);
+                    if (idx < 0 || idx >= all.length) {
+                        await reply(sock, msg, `❌ *Invalid number.* Use .remind list to see your reminders.`);
+                        return;
+                    }
+                    const r = all[idx];
+                    const handle = activeReminders.get(r.id);
+                    if (handle) clearTimeout(handle);
+                    activeReminders.delete(r.id);
+                    await persistence.removeReminder(r.id);
+                    await reply(sock, msg, `✅ *Reminder cancelled:* "${r.text}"`);
+                    return;
+                }
+
+                // .remind [time] [text]
                 const timeMatch = body.match(/^([\d\s]+(?:h(?:our)?s?|m(?:in)?s?|s(?:ec)?s?)\s*)+/i);
                 if (!timeMatch) {
-                    await reply(sock, msg, `❌ *Invalid time format.*\n_Examples:_ .remind 30min ...  / .remind 2h ...  / .remind 1h 30min ...`);
+                    await reply(sock, msg, `❌ *Invalid format.*\n_Examples:_\n• .remind 30min Call client\n• .remind 2h Check emails\n• .remind list\n• .remind cancel 1`);
                     return;
                 }
 
-                const timeStr    = timeMatch[0].trim();
+                const timeStr      = timeMatch[0].trim();
                 const reminderText = body.replace(timeMatch[0], '').trim();
 
                 if (!reminderText) {
-                    await reply(sock, msg, `❌ *Please include a reminder message.*\n_e.g. .remind 30min Call the client_`);
+                    await reply(sock, msg, `❌ *Please include a message.*\n_e.g. .remind 30min Call the client_`);
                     return;
                 }
 
@@ -595,6 +628,32 @@ async function startAssistant() {
                     return;
                 }
 
+                // .keyword — manage alert keywords
+                if (textLower.startsWith('.keyword')) {
+                    const kParts = text.replace(/^\.keyword\s*/i, '').trim();
+                    const kCmd   = kParts.split(' ')[0]?.toLowerCase();
+                    const kWord  = kParts.replace(/^\S+\s*/, '').trim();
+                    if (!kCmd || kCmd === 'list') {
+                        const kws = persistence.getKeywords();
+                        await reply(sock, msg, `🔔 *Alert Keywords (${kws.length})*\n\n${kws.map((k, i) => `${i + 1}. ${k}`).join('\n')}\n\n_Use .keyword add [word] or .keyword del [word]_`);
+                    } else if (kCmd === 'add' && kWord) {
+                        const added = await persistence.addKeyword(kWord);
+                        await reply(sock, msg, added
+                            ? `✅ *Keyword added:* "${kWord}"`
+                            : `⚠️ *"${kWord}" is already in your list.*`
+                        );
+                    } else if ((kCmd === 'del' || kCmd === 'delete') && kWord) {
+                        const removed = await persistence.removeKeyword(kWord);
+                        await reply(sock, msg, removed
+                            ? `🗑 *Keyword removed:* "${kWord}"`
+                            : `❌ *"${kWord}" not found.*`
+                        );
+                    } else {
+                        await reply(sock, msg, `🔔 *Keyword Commands:*\n• .keyword list\n• .keyword add [word]\n• .keyword del [word]`);
+                    }
+                    return;
+                }
+
                 // .banlist
                 if (textLower === '.banlist') {
                     bannedUsers = persistence.getBanned();
@@ -608,6 +667,68 @@ async function startAssistant() {
                     }
                     return;
                 }
+            }
+
+            // =================================================================
+            // 🌐 .TRANSLATE — translate text using AI
+            // =================================================================
+            if (textLower.startsWith('.translate')) {
+                const parts    = text.replace(/^\.translate\s*/i, '').trim();
+                const spaceIdx = parts.indexOf(' ');
+                if (spaceIdx === -1) {
+                    await reply(sock, msg, `🌐 *Usage:* .translate [language] [text]\n_e.g. .translate arabic Good morning_`);
+                    return;
+                }
+                const lang     = parts.substring(0, spaceIdx);
+                const toTranslate = parts.substring(spaceIdx + 1).trim();
+                await react(sock, msg, '🌐');
+                await sock.sendPresenceUpdate('composing', from);
+                const tKey   = participant + '_translate';
+                const result = await ai.chat(tKey, `Translate the following text to ${lang}. Return ONLY the translated text, nothing else:\n\n"${toTranslate}"`);
+                ai.resetConversation(tKey);
+                await reply(sock, msg, result.success
+                    ? `🌐 *Translated to ${lang}:*\n\n${result.message}`
+                    : `❌ *Translation failed.* Try again.`
+                );
+                await sock.sendPresenceUpdate('paused', from);
+                return;
+            }
+
+            // =================================================================
+            // 🧮 .CALC — quick calculations using AI
+            // =================================================================
+            if (textLower.startsWith('.calc')) {
+                const expr = text.replace(/^\.calc\s*/i, '').trim();
+                if (!expr) {
+                    await reply(sock, msg, `🧮 *Usage:* .calc [expression]\n_e.g. .calc 15% of 85000_`);
+                    return;
+                }
+                await react(sock, msg, '🧮');
+                const cKey   = participant + '_calc';
+                const result = await ai.chat(cKey, `Calculate this and return the answer with a brief one-line explanation. Be concise:\n${expr}`);
+                ai.resetConversation(cKey);
+                await reply(sock, msg, result.success
+                    ? `🧮 *Result*\n\n${result.message}`
+                    : `❌ *Could not calculate.*`
+                );
+                return;
+            }
+
+            // =================================================================
+            // ✨ .QOD — quote of the day on demand
+            // =================================================================
+            if (textLower === '.qod') {
+                await react(sock, msg, '✨');
+                await sock.sendPresenceUpdate('composing', from);
+                const qKey   = participant + '_qod';
+                const result = await ai.chat(qKey, 'Give me one powerful motivational quote with author name. Format exactly: "Quote" — Author. Nothing else.');
+                ai.resetConversation(qKey);
+                await reply(sock, msg, result.success
+                    ? `✨ *Quote of the Day*\n\n${result.message}`
+                    : `❌ *Could not fetch a quote.*`
+                );
+                await sock.sendPresenceUpdate('paused', from);
+                return;
             }
 
             // =================================================================
@@ -698,7 +819,7 @@ async function startAssistant() {
             // KEYWORD MONITOR — alert owner when keywords detected
             // Uses word boundaries to avoid false positives (e.g. "tamam", "stamp")
             // =================================================================
-            const matchedKeyword = config.keywords.find(kw => {
+            const matchedKeyword = persistence.getKeywords().find(kw => {
                 try { return new RegExp(`\\b${kw}\\b`, 'i').test(text); } catch { return false; }
             });
             if (matchedKeyword) {
