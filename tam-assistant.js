@@ -47,6 +47,10 @@ const startTime = Date.now();
 let bannedUsers, imageContext, stats;
 let activeReminders = new Map(); // id -> timeoutHandle
 
+// Bot socket ref — set once Baileys connects, used by dashboard /cmd endpoint
+let _sockRef     = null;
+let _ownerJidRef = null;
+
 const SESSION_PATH = './session_assistant';
 const logger       = pino({ level: 'silent' });
 
@@ -76,11 +80,18 @@ function extractText(msg) {
 }
 
 async function react(sock, msg, emoji) {
+    // Skip emoji reactions for dashboard-injected messages (they have no real key to react to)
+    if (msg.key.id?.startsWith('DASH_')) return;
     try { await sock.sendMessage(msg.key.remoteJid, { react: { text: emoji, key: msg.key } }); } catch {}
 }
 
 async function reply(sock, msg, text) {
-    await sock.sendMessage(msg.key.remoteJid, { text, ai: true }, { quoted: msg });
+    // Dashboard-injected messages: send plain (no quote, no invalid key reference)
+    if (msg.key.id?.startsWith('DASH_')) {
+        await sock.sendMessage(msg.key.remoteJid, { text });
+    } else {
+        await sock.sendMessage(msg.key.remoteJid, { text, ai: true }, { quoted: msg });
+    }
 }
 
 // ─── Reminder Scheduler ───────────────────────────────────────────────────────
@@ -212,6 +223,7 @@ async function startAssistant() {
     sock.ev.on('creds.update', saveCreds);
 
     const ownerJid = config.ownerNumber + '@s.whatsapp.net';
+    _ownerJidRef   = ownerJid;
     const alertJid = config.alertNumber.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
     let wasConnected = false;
 
@@ -221,6 +233,7 @@ async function startAssistant() {
 
         if (connection === 'open') {
             console.log(chalk.green('[CONNECTION] Online! TAM Assistant v2.0 is live.'));
+            _sockRef = sock;
             initScheduler(sock, ownerJid, () => persistence, () => ai);
             rescheduleAllReminders(sock);
 
@@ -1044,6 +1057,35 @@ app.get('/', (req, res) => {
     const b = persistence.getBanned();
     res.setHeader('Content-Type', 'text/html');
     res.send(getDashboardHTML(s, b.size, ai.getInfo(), Date.now() - startTime));
+});
+
+// ─── Dashboard Bot Terminal ────────────────────────────────────────────────────
+// Accepts a command from the dashboard and injects it as a fake owner message
+// into the existing message pipeline — all command logic runs as normal,
+// and the bot replies to the owner's WhatsApp number.
+app.post('/cmd', (req, res) => {
+    if (!isAuthenticated(req)) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    const text = (req.body.text || '').trim();
+    if (!text)            return res.json({ ok: false, error: 'Empty command' });
+    if (!_sockRef)        return res.json({ ok: false, error: 'Bot not connected yet' });
+    if (!_ownerJidRef)    return res.json({ ok: false, error: 'Owner JID not set' });
+
+    // Build a fake incoming message that looks like the owner sent it in a DM
+    const fakeMsg = {
+        key: {
+            remoteJid: _ownerJidRef,
+            fromMe:    false,
+            id:        'DASH_' + Date.now(),
+            participant: undefined
+        },
+        message:          { conversation: text },
+        pushName:         'Taha (Dashboard)',
+        messageTimestamp: Math.floor(Date.now() / 1000)
+    };
+
+    // Fire it through the normal message handler
+    _sockRef.ev.emit('messages.upsert', { messages: [fakeMsg], type: 'notify' });
+    res.json({ ok: true });
 });
 
 app.get('/health', (req, res) => {
