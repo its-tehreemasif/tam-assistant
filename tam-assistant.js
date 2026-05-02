@@ -17,7 +17,9 @@ const {
 
 const pino       = require('pino');
 const express    = require('express');
+const crypto     = require('crypto');
 const app        = express();
+app.use(express.urlencoded({ extended: false }));
 const PORT       = process.env.PORT || 3000;
 const chalk      = require('chalk');
 const fs         = require('fs-extra');
@@ -350,9 +352,13 @@ async function startAssistant() {
                 return;
             }
 
-            // .help
+            // .help — owner only
             if (textLower === '.help') {
-                await reply(sock, msg, getHelp());
+                if (!isOwner) {
+                    await reply(sock, msg, `🔒 *Restricted*\n_This command is only available to the owner._\n_Contact *Taha* if you need assistance._`);
+                } else {
+                    await reply(sock, msg, getHelp());
+                }
                 return;
             }
 
@@ -645,8 +651,140 @@ async function startAssistant() {
     });
 }
 
-// ─── Dashboard ────────────────────────────────────────────────────────────────
+// ─── Dashboard Auth ────────────────────────────────────────────────────────────
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || 'tam2024';
+const SESSION_SECRET_KEY = process.env.SESSION_SECRET || 'tam-secret-key';
+
+function makeCookieToken() {
+    return crypto.createHmac('sha256', SESSION_SECRET_KEY).update(DASHBOARD_PASSWORD).digest('hex');
+}
+function parseCookies(header = '') {
+    const out = {};
+    header.split(';').forEach(part => {
+        const [k, ...v] = part.trim().split('=');
+        if (k) out[k.trim()] = decodeURIComponent(v.join('='));
+    });
+    return out;
+}
+function isAuthenticated(req) {
+    return parseCookies(req.headers.cookie || '').tam_auth === makeCookieToken();
+}
+
+function getLoginHTML(error = false) {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TAM Assistant — Login</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0a0a0f;
+            color: #e2e8f0;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .card {
+            background: #0f172a;
+            border: 1px solid #1e293b;
+            border-radius: 20px;
+            padding: 40px 36px;
+            width: 100%;
+            max-width: 380px;
+            text-align: center;
+        }
+        .logo {
+            width: 60px; height: 60px;
+            background: linear-gradient(135deg, #25d366, #128c7e);
+            border-radius: 16px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 28px;
+            margin: 0 auto 20px;
+        }
+        h1 { font-size: 20px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
+        p  { font-size: 13px; color: #64748b; margin-bottom: 28px; }
+        input[type="password"] {
+            width: 100%;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            color: #f8fafc;
+            font-size: 15px;
+            padding: 12px 16px;
+            outline: none;
+            margin-bottom: 14px;
+            transition: border-color 0.2s;
+        }
+        input[type="password"]:focus { border-color: #25d366; }
+        button {
+            width: 100%;
+            background: linear-gradient(135deg, #25d366, #128c7e);
+            color: #fff;
+            font-size: 15px;
+            font-weight: 600;
+            border: none;
+            border-radius: 10px;
+            padding: 13px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.9; }
+        .error {
+            background: #7f1d1d22;
+            border: 1px solid #f8717133;
+            color: #f87171;
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 13px;
+            margin-bottom: 14px;
+        }
+        .footer { color: #334155; font-size: 12px; margin-top: 24px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">🤖</div>
+        <h1>TAM Assistant</h1>
+        <p>Enter your dashboard password</p>
+        ${error ? '<div class="error">❌ Incorrect password. Try again.</div>' : ''}
+        <form method="POST" action="/login">
+            <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password" />
+            <button type="submit">Unlock Dashboard</button>
+        </form>
+        <div class="footer">TAM Tech • Private Access Only</div>
+    </div>
+</body>
+</html>`;
+}
+
+// ─── Dashboard Routes ──────────────────────────────────────────────────────────
+app.get('/login', (req, res) => {
+    if (isAuthenticated(req)) return res.redirect('/');
+    res.setHeader('Content-Type', 'text/html');
+    res.send(getLoginHTML(false));
+});
+
+app.post('/login', (req, res) => {
+    if (req.body.password === DASHBOARD_PASSWORD) {
+        const token = makeCookieToken();
+        res.setHeader('Set-Cookie', `tam_auth=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`);
+        return res.redirect('/');
+    }
+    res.setHeader('Content-Type', 'text/html');
+    res.send(getLoginHTML(true));
+});
+
+app.get('/logout', (req, res) => {
+    res.setHeader('Set-Cookie', 'tam_auth=; Path=/; HttpOnly; Max-Age=0');
+    res.redirect('/login');
+});
+
 app.get('/', (req, res) => {
+    if (!isAuthenticated(req)) return res.redirect('/login');
     const s = persistence.getStats();
     const b = persistence.getBanned();
     res.setHeader('Content-Type', 'text/html');
