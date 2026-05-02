@@ -16,6 +16,7 @@ const {
 } = require('@whiskeysockets/baileys');
 
 const pino       = require('pino');
+const axios      = require('axios');
 const express    = require('express');
 const crypto     = require('crypto');
 const app        = express();
@@ -139,14 +140,16 @@ function getHelp() {
 • @TAM _[message]_ — Chat with AI
 • _.vision_ — Analyze an image (send/reply to photo)
 • _.vision [question]_ — Ask about an image
+• _.export_ — Get your full AI chat history
 
 🎙 *Voice:*
 • Send a voice note in DM — auto-transcribes
-• _.transcribe_ — reply to any voice note in a group to transcribe it
+• _.transcribe_ — reply to a voice note in a group to transcribe it
 
 📝 *Notes:*
 • _.note add [text]_ — Save a note
 • _.note list_ — View all notes
+• _.note search [keyword]_ — Search your notes
 • _.note del [#]_ — Delete note by number
 • _.note clear_ — Delete all notes
 
@@ -154,7 +157,11 @@ function getHelp() {
 • _.remind [time] [text]_
   _Examples:_ .remind 30min Call client
             .remind 2h Check emails
-            .remind 1hour 30min Meeting
+            .remind 1h 30min Meeting
+
+🌍 *Live Data:*
+• _.weather [city]_ — Current weather anywhere
+• _.time [city]_ — Current time in any timezone
 
 🔧 *Utilities:*
 • _.ping_ — Check if bot is alive
@@ -247,14 +254,24 @@ async function startAssistant() {
             const participant = isGroup ? msg.key.participant : from;
             const pushName    = msg.pushName || 'User';
             const isOwner     = participant === ownerJid;
+            const isDM        = !isGroup;
             const text        = extractText(msg);
             const textLower   = text.toLowerCase().trim();
 
-            // ─── Rate limiting ────────────────────────────────────────────────
+            // ─── Rate limiting + auto-ban ─────────────────────────────────────
             if (!isOwner && text) {
                 const check = rateLimiter.checkMessage(participant);
                 if (!check.allowed) {
-                    await reply(sock, msg, `⏳ *Slow down!*\n_Too many messages. Wait *${check.resetIn}s* before sending more._`);
+                    if (check.autoban) {
+                        // 3 consecutive violations → temp ban (1 hour)
+                        bannedUsers = persistence.getBanned();
+                        bannedUsers.add(participant);
+                        await persistence.setBanned(bannedUsers);
+                        console.log(chalk.red(`[AUTOBAN] ${pushName} (${participant}) auto-banned for spam`));
+                        await reply(sock, msg, `🚫 *Auto-Banned*\n_You've been restricted for excessive spamming._\n_Contact the owner to appeal._`);
+                    } else {
+                        await reply(sock, msg, `⏳ *Slow down!*\n_Too many messages. Wait *${check.resetIn}s* before sending more._\n_Warning ${check.violations}/3 — repeated violations will result in a ban._`);
+                    }
                     return;
                 }
             }
@@ -437,11 +454,25 @@ async function startAssistant() {
                             : `❌ *Note #${idx + 1} not found.*`
                         );
                     }
+                } else if (cmd === 'search') {
+                    if (!body) {
+                        await reply(sock, msg, `🔍 *Usage:* .note search [keyword]`);
+                    } else {
+                        const results = notes
+                            .map((n, i) => ({ ...n, idx: i + 1 }))
+                            .filter(n => n.text.toLowerCase().includes(body.toLowerCase()));
+                        if (results.length === 0) {
+                            await reply(sock, msg, `🔍 *No notes matching "${body}"*\n_Try a different keyword._`);
+                        } else {
+                            const list = results.map(n => `${n.idx}. ${n.text}\n   _${n.createdAt}_`).join('\n\n');
+                            await reply(sock, msg, `🔍 *Notes matching "${body}" (${results.length})*\n\n${list}`);
+                        }
+                    }
                 } else if (cmd === 'clear') {
                     await persistence.clearNotes(participant);
                     await reply(sock, msg, `🧹 *All notes cleared.*`);
                 } else {
-                    await reply(sock, msg, `📝 *Notes Commands:*\n• .note add [text]\n• .note list\n• .note del [#]\n• .note clear`);
+                    await reply(sock, msg, `📝 *Notes Commands:*\n• .note add [text]\n• .note list\n• .note search [keyword]\n• .note del [#]\n• .note clear`);
                 }
                 return;
             }
@@ -580,9 +611,96 @@ async function startAssistant() {
             }
 
             // =================================================================
-            // KEYWORD MONITOR — alert owner when keywords detected
+            // 📤 .EXPORT — send AI chat history as text
             // =================================================================
-            const matchedKeyword = config.keywords.find(kw => textLower.includes(kw.toLowerCase()));
+            if (textLower === '.export') {
+                const history = ai.getHistory(participant);
+                if (history.length === 0) {
+                    await reply(sock, msg, `📭 *No chat history to export.*\n_Start a conversation with @TAM first._`);
+                    return;
+                }
+                let exportText = `🤖 *TAM AI — Chat Export*\n📅 ${moment().tz('Asia/Karachi').format('DD MMM YYYY, hh:mm A')}\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
+                history.forEach(h => {
+                    const role = h.role === 'user' ? '👤 *You:*' : '🤖 *TAM AI:*';
+                    exportText += `${role}\n${h.content}\n\n`;
+                });
+                await reply(sock, msg, exportText);
+                return;
+            }
+
+            // =================================================================
+            // 🌤 .WEATHER — live weather via wttr.in (no API key needed)
+            // =================================================================
+            if (textLower.startsWith('.weather')) {
+                const city = text.replace(/^\.weather\s*/i, '').trim() || 'Karachi';
+                await react(sock, msg, '🌤');
+                await sock.sendPresenceUpdate('composing', from);
+                try {
+                    const res = await axios.get(
+                        `https://wttr.in/${encodeURIComponent(city)}?format=j1`,
+                        { timeout: 15000 }
+                    );
+                    const w       = res.data;
+                    const cur     = w.current_condition[0];
+                    const area    = w.nearest_area[0];
+                    const name    = area.areaName[0].value;
+                    const country = area.country[0].value;
+                    const desc    = cur.weatherDesc[0].value;
+                    const tempC   = cur.temp_C;
+                    const feelsC  = cur.FeelsLikeC;
+                    const humid   = cur.humidity;
+                    const wind    = cur.windspeedKmph;
+                    const vis     = cur.visibility;
+                    await reply(sock, msg,
+                        `🌤 *Weather — ${name}, ${country}*\n━━━━━━━━━━━━━━━━━━━━━\n\n` +
+                        `🌡 *Temperature:* ${tempC}°C _(feels like ${feelsC}°C)_\n` +
+                        `⛅ *Condition:* ${desc}\n` +
+                        `💧 *Humidity:* ${humid}%\n` +
+                        `💨 *Wind:* ${wind} km/h\n` +
+                        `👁 *Visibility:* ${vis} km\n\n` +
+                        `_📍 ${name}, ${country}_`
+                    );
+                } catch {
+                    await reply(sock, msg, `❌ *Weather unavailable for "${city}"*\n_Check the city name and try again._`);
+                }
+                await sock.sendPresenceUpdate('paused', from);
+                return;
+            }
+
+            // =================================================================
+            // 🕐 .TIME — current time in any city/timezone
+            // =================================================================
+            if (textLower.startsWith('.time')) {
+                const input = text.replace(/^\.time\s*/i, '').trim();
+                if (!input) {
+                    const now = moment().tz('Asia/Karachi').format('hh:mm A');
+                    const date = moment().tz('Asia/Karachi').format('DD MMM YYYY');
+                    await reply(sock, msg, `🕐 *Current Time (PKT)*\n\n*${now}*\n📅 ${date}`);
+                    return;
+                }
+                const allZones = moment.tz.names();
+                const lInput   = input.toLowerCase().replace(/\s+/g, '_');
+                const match    = allZones.find(z => z.toLowerCase() === lInput) ||
+                                 allZones.find(z => z.toLowerCase().endsWith('/' + lInput)) ||
+                                 allZones.find(z => z.toLowerCase().includes(lInput));
+                if (!match) {
+                    await reply(sock, msg, `❌ *City not found: "${input}"*\n\n_Try:_\n• .time London\n• .time Dubai\n• .time New_York\n• .time Tokyo`);
+                    return;
+                }
+                const timeStr = moment().tz(match).format('hh:mm A');
+                const dateStr = moment().tz(match).format('DD MMM YYYY');
+                const offset  = moment().tz(match).format('Z');
+                await reply(sock, msg, `🕐 *Time — ${match.split('/').pop().replace(/_/g, ' ')}*\n\n*${timeStr}*\n📅 ${dateStr}\n🌍 UTC${offset}`);
+                return;
+            }
+
+            // =================================================================
+            // KEYWORD MONITOR — alert owner when keywords detected
+            // Uses word boundaries to avoid false positives (e.g. "tamam", "stamp")
+            // =================================================================
+            const matchedKeyword = config.keywords.find(kw => {
+                try { return new RegExp(`\\b${kw}\\b`, 'i').test(text); } catch { return false; }
+            });
             if (matchedKeyword) {
                 console.log(chalk.yellow(`[MONITOR] Keyword "${matchedKeyword}" from ${pushName}`));
                 let groupName = 'Private Chat';
@@ -596,13 +714,11 @@ async function startAssistant() {
             }
 
             // =================================================================
-            // AI RESPONSE — fires on @TAM / @taha mentions
+            // AI RESPONSE — fires on wake tags or JID mention
             // =================================================================
-            const tags             = ['@tam', '@taha', '@taha asif'];
-            const hasTag           = tags.some(t => textLower.includes(t));
+            const hasTag           = config.wakeTags.some(t => textLower.includes(t));
             const isJidMentioned   = (msg.message.extendedTextMessage?.contextInfo?.mentionedJid || []).includes(ownerJid);
             const shouldRespond    = hasTag || isJidMentioned;
-            const isDM             = !isGroup;
 
             if (isDM) {
                 await sock.sendPresenceUpdate('recording', from);
