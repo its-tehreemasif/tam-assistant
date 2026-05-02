@@ -70,9 +70,16 @@ async function bootstrapSession() {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Unwrap deviceSentMessage — primary phone messages arrive at linked Render
+// device wrapped in this envelope; bot's own outgoing messages do NOT.
+function unwrapMessage(msg) {
+    return msg.message?.deviceSentMessage?.message || msg.message;
+}
+
 function extractText(msg) {
     try {
-        const m    = msg.message;
+        const m    = unwrapMessage(msg);
         const type = Object.keys(m)[0];
         const c    = m[type];
         return m.conversation || c?.text || c?.caption || m.extendedTextMessage?.text || '';
@@ -265,14 +272,21 @@ async function startAssistant() {
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages[0];
-            // Normalize JID — multidevice can suffix device number e.g. 923...:1@s.whatsapp.net
+
+            // normalizeJid strips device suffix (e.g. 923...:1@s.whatsapp.net → 923...@s.whatsapp.net)
             const normalizeJid = (jid) => {
                 if (!jid) return jid;
                 return jid.includes(':') ? jid.split(':')[0] + '@s.whatsapp.net' : jid;
             };
-            // Allow self-chat: owner typing commands to their own number (bot number = personal number)
-            // All other fromMe messages (bot's own outgoing replies etc.) stay ignored
-            const isSelfChat = msg.key.fromMe && normalizeJid(msg.key.remoteJid) === ownerJid;
+
+            // Key multidevice insight:
+            //   • msg.message.deviceSentMessage  → sent BY the primary phone (user typing)
+            //   • no deviceSentMessage, fromMe   → sent BY this Baileys session (bot's own replies)
+            // Self-chat = primary phone sent a message to its own number (Note to Self)
+            const isFromPrimaryPhone = !!msg.message?.deviceSentMessage;
+            const isSelfChat = isFromPrimaryPhone && normalizeJid(msg.key.remoteJid) === ownerJid;
+
+            // Drop everything from the bot itself EXCEPT self-chat messages from the primary phone
             if (!msg.message || (msg.key.fromMe && !isSelfChat)) return;
 
             const from        = msg.key.remoteJid;
