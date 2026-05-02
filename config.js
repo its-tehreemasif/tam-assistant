@@ -28,6 +28,7 @@ module.exports = {
     // MONITORING & STATUS
     // ═══════════════════════════════════════════════════════════
     keywords: ['Taha', 'taha', 'TAM', 'tam'],
+    wakeTags: ['@tam', '@taha', '@taha asif', '@assistant', '@bot'],
     recordingDelay: 5000, // 5 seconds (was 20s — reduced for responsiveness)
 
     // ═══════════════════════════════════════════════════════════
