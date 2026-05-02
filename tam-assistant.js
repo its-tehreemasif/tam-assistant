@@ -255,8 +255,14 @@ async function startAssistant() {
             if (!msg.message || msg.key.fromMe) return;
 
             const from        = msg.key.remoteJid;
-            // Skip WhatsApp channels, newsletters and broadcast lists
-            if (from.endsWith('@newsletter') || from.endsWith('@broadcast') || from === 'status@broadcast') return;
+            // Skip all non-human sources:
+            // - Channels/newsletters (any format: @newsletter, @lid, numeric-only @g.us that are channels)
+            // - Broadcast lists, status updates
+            // - Any private "chat" that isn't a real phone number (@s.whatsapp.net)
+            if (from === 'status@broadcast') return;
+            if (from.endsWith('@broadcast')) return;
+            if (from.endsWith('@newsletter')) return;
+            if (!from.endsWith('@g.us') && !from.endsWith('@s.whatsapp.net')) return;
             const isGroup     = from.endsWith('@g.us');
             const participant = isGroup ? msg.key.participant : from;
             const pushName    = msg.pushName || 'User';
