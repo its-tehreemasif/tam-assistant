@@ -1,7 +1,7 @@
 {
     "name": "tam-personal-assistant",
     "version": "2.0.0",
-    "description": "OpenClaw — AI Personal Assistant Bot by TAM Tech",
+    "description": "TAM AI — Personal WhatsApp Assistant by TAM Tech",
     "main": "tam-assistant.js",
     "scripts": {
         "start": "node tam-assistant.js",
