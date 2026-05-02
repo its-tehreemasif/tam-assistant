@@ -252,7 +252,10 @@ async function startAssistant() {
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages[0];
-            if (!msg.message || msg.key.fromMe) return;
+            // Allow self-chat: owner typing commands to their own number (bot number = personal number)
+            // All other fromMe messages (bot's own outgoing replies etc.) stay ignored
+            const isSelfChat = msg.key.fromMe && msg.key.remoteJid === ownerJid;
+            if (!msg.message || (msg.key.fromMe && !isSelfChat)) return;
 
             const from        = msg.key.remoteJid;
             // Skip all non-human sources:
