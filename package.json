@@ -1,7 +1,7 @@
 {
     "name": "tam-personal-assistant",
-    "version": "1.0.0",
-    "description": "AI Personal Assistant Bot with Keyword Monitoring",
+    "version": "2.0.0",
+    "description": "OpenClaw — AI Personal Assistant Bot by TAM Tech",
     "main": "tam-assistant.js",
     "scripts": {
         "start": "node tam-assistant.js",
@@ -16,6 +16,7 @@
         "form-data": "^4.0.5",
         "fs-extra": "^11.1.1",
         "moment-timezone": "^0.5.43",
+        "node-cron": "^3.0.3",
         "pino": "^8.16.2",
         "qrcode-terminal": "^0.12.0"
     },
