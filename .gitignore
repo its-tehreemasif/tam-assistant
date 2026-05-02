@@ -5,6 +5,7 @@ yarn-error.log*
 .env
 session_assistant/
 auth_info_baileys/
+data/
 *.json
 !package.json
 !app.json
