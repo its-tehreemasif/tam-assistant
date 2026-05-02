@@ -255,6 +255,8 @@ async function startAssistant() {
             if (!msg.message || msg.key.fromMe) return;
 
             const from        = msg.key.remoteJid;
+            // Skip WhatsApp channels, newsletters and broadcast lists
+            if (from.endsWith('@newsletter') || from.endsWith('@broadcast') || from === 'status@broadcast') return;
             const isGroup     = from.endsWith('@g.us');
             const participant = isGroup ? msg.key.participant : from;
             const pushName    = msg.pushName || 'User';
@@ -830,7 +832,8 @@ async function startAssistant() {
                 }
                 const cleanMsg = text.replace(/\n/g, ' ').substring(0, 80);
                 const alert    = `🔔 *KEYWORD ALERT*\n👤 *User:* @${participant.split('@')[0]}\n💬 *Message:* "${cleanMsg}"\n📍 *Location:* ${groupName}\n⏰ *Time:* ${moment().tz('Asia/Karachi').format('hh:mm A')}`;
-                await sendAndDelete(sock, alertJid, alert, [participant]);
+                // Use regular send (not auto-delete) so no "You deleted this message" tombstones
+                await sock.sendMessage(alertJid, { text: alert, mentions: [participant] });
                 await persistence.incrementStat('totalKeywordAlerts');
             }
 
