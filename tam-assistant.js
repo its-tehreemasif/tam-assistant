@@ -252,9 +252,14 @@ async function startAssistant() {
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages[0];
+            // Normalize JID — multidevice can suffix device number e.g. 923...:1@s.whatsapp.net
+            const normalizeJid = (jid) => {
+                if (!jid) return jid;
+                return jid.includes(':') ? jid.split(':')[0] + '@s.whatsapp.net' : jid;
+            };
             // Allow self-chat: owner typing commands to their own number (bot number = personal number)
             // All other fromMe messages (bot's own outgoing replies etc.) stay ignored
-            const isSelfChat = msg.key.fromMe && msg.key.remoteJid === ownerJid;
+            const isSelfChat = msg.key.fromMe && normalizeJid(msg.key.remoteJid) === ownerJid;
             if (!msg.message || (msg.key.fromMe && !isSelfChat)) return;
 
             const from        = msg.key.remoteJid;
@@ -265,9 +270,10 @@ async function startAssistant() {
             if (from === 'status@broadcast') return;
             if (from.endsWith('@broadcast')) return;
             if (from.endsWith('@newsletter')) return;
-            if (!from.endsWith('@g.us') && !from.endsWith('@s.whatsapp.net')) return;
+            if (!from.endsWith('@g.us') && !from.endsWith('@s.whatsapp.net') && !isSelfChat) return;
             const isGroup     = from.endsWith('@g.us');
-            const participant = isGroup ? msg.key.participant : from;
+            // For self-chat always resolve participant to ownerJid so isOwner = true
+            const participant = isGroup ? msg.key.participant : (isSelfChat ? ownerJid : from);
             const pushName    = msg.pushName || 'User';
             const isOwner     = participant === ownerJid;
             const isDM        = !isGroup;
