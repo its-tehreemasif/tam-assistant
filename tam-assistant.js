@@ -1,7 +1,7 @@
 /**
  * ╔═══════════════════════════════════════════════════════════╗
  * ║           TAM PERSONAL ASSISTANT v2.0                       ║
- * ║        OpenClaw — Powered by TAM Tech                     ║
+ * ║              Powered by TAM Tech                          ║
  * ╚═══════════════════════════════════════════════════════════╝
  */
 
@@ -130,7 +130,7 @@ function parseRemindTime(str) {
 
 // ─── Command: Help ────────────────────────────────────────────────────────────
 function getHelp() {
-    return `🤖 *OpenClaw — Command Guide*
+    return `🤖 *TAM AI — Command Guide*
 ━━━━━━━━━━━━━━━━━━━━━
 
 💬 *AI & Vision:*
@@ -139,7 +139,8 @@ function getHelp() {
 • _.vision [question]_ — Ask about an image
 
 🎙 *Voice:*
-• Send/reply to a voice note — auto-transcribes
+• Send a voice note in DM — auto-transcribes
+• _.transcribe_ — reply to any voice note in a group to transcribe it
 
 📝 *Notes:*
 • _.note add [text]_ — Save a note
@@ -165,7 +166,7 @@ function getHelp() {
 • _.stats_ — Detailed statistics
 • _.reset all_ — Clear all conversations
 ━━━━━━━━━━━━━━━━━━━━━
-_Powered by OpenClaw × TAM Tech_ 🚀`;
+_Powered by TAM Tech_ 🚀`;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -177,7 +178,7 @@ async function startAssistant() {
     stats        = persistence.getStats();
 
     await bootstrapSession();
-    console.log(chalk.cyan('\n[OPENCLAW] Starting TAM Personal Assistant v2.0...'));
+    console.log(chalk.cyan('\n[TAM] Starting TAM Personal Assistant v2.0...'));
 
     const { version }          = await fetchLatestBaileysVersion();
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_PATH);
@@ -259,7 +260,7 @@ async function startAssistant() {
             // ─── Ban check ────────────────────────────────────────────────────
             bannedUsers = persistence.getBanned();
             if (bannedUsers.has(participant) && !isOwner) {
-                await reply(sock, msg, `🚫 *Access Denied*\n_You've been restricted from OpenClaw._\n_Contact the owner if this is a mistake._`);
+                await reply(sock, msg, `🚫 *Access Denied*\n_You've been restricted from TAM AI._\n_Contact the owner if this is a mistake._`);
                 return;
             }
 
@@ -267,10 +268,13 @@ async function startAssistant() {
             if (text) await persistence.incrementStat('totalMessages', participant);
 
             // =================================================================
-            // 🎙 VOICE TRANSCRIPTION — fires on any audio message automatically
+            // 🎙 VOICE TRANSCRIPTION
+            // DMs  → auto-transcribe every voice note
+            // Groups → only when someone replies to a voice note with .transcribe
             // =================================================================
-            if (isVoiceMessage(msg)) {
-                console.log(chalk.magenta(`[VOICE] Audio received from ${pushName}`));
+            if (isVoiceMessage(msg) && isDM) {
+                // Auto-transcribe in DMs only
+                console.log(chalk.magenta(`[VOICE] Auto-transcribing DM voice note from ${pushName}`));
                 await react(sock, msg, '🎙');
                 await sock.sendPresenceUpdate('composing', from);
 
@@ -282,7 +286,6 @@ async function startAssistant() {
                     await reply(sock, msg,
                         `🎙 *Voice Transcription*${durationStr}\n\n"${result.text}"\n\n_💡 @TAM can answer questions about this._`
                     );
-                    // Store transcription as image context for follow-up via @TAM
                     imageContext = persistence.getImageContext();
                     imageContext.set(participant, { text: result.text, timestamp: Date.now() });
                     await persistence.setImageContext(imageContext);
@@ -296,6 +299,45 @@ async function startAssistant() {
 
             if (!text) return;
 
+            // =================================================================
+            // 🎙 .TRANSCRIBE — manual command for groups (reply to a voice note)
+            // =================================================================
+            if (textLower === '.transcribe') {
+                const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+                if (!quotedMsg) {
+                    await reply(sock, msg, `❌ *Reply to a voice note* with .transcribe`);
+                    return;
+                }
+                // Build a fake message wrapper so transcribeVoice can download it
+                const fakeMsg = { ...msg, message: quotedMsg };
+                if (!isVoiceMessage(fakeMsg)) {
+                    await reply(sock, msg, `❌ *That message isn't a voice note.*`);
+                    return;
+                }
+
+                console.log(chalk.magenta(`[VOICE] Manual transcribe in group by ${pushName}`));
+                await react(sock, msg, '🎙');
+                await sock.sendPresenceUpdate('composing', from);
+
+                const result = await transcribeVoice(fakeMsg, config.aiApiKey);
+                await persistence.incrementStat('totalVoiceTranscriptions', participant);
+
+                if (result.success) {
+                    const durationStr = result.duration ? ` _(${result.duration}s)_` : '';
+                    await reply(sock, msg,
+                        `🎙 *Voice Transcription*${durationStr}\n\n"${result.text}"\n\n_💡 @TAM can answer questions about this._`
+                    );
+                    imageContext = persistence.getImageContext();
+                    imageContext.set(participant, { text: result.text, timestamp: Date.now() });
+                    await persistence.setImageContext(imageContext);
+                } else {
+                    await reply(sock, msg, `❌ *Transcription failed*\n_${result.error}_`);
+                }
+
+                await sock.sendPresenceUpdate('paused', from);
+                return;
+            }
+
             console.log(chalk.gray(`[MSG] ${participant} (${isGroup ? 'Group' : 'DM'}): "${text.substring(0, 60)}"`));
 
             // =================================================================
@@ -304,7 +346,7 @@ async function startAssistant() {
 
             // .ping
             if (textLower === '.ping') {
-                await reply(sock, msg, `🏓 *Pong!* ⚡\n_OpenClaw is alive._`);
+                await reply(sock, msg, `🏓 *Pong!* ⚡\n_TAM AI is alive._`);
                 return;
             }
 
@@ -455,7 +497,7 @@ async function startAssistant() {
                     const aiInfo   = ai.getInfo();
                     const now      = moment().tz('Asia/Karachi').format('DD MMM YYYY, hh:mm A');
                     await reply(sock, msg,
-                        `⚡ *OpenClaw — Status*\n\n🟢 Online & Running\n⏱ Uptime: ${uStr}\n🕐 ${now}\n\n🤖 *AI:* ${aiInfo.model}\n• Active chats: ${aiInfo.activeConversations}\n• Total calls: ${aiInfo.totalCalls}\n\n📊 *Stats:*\n• Messages: ${stats.totalMessages}\n• AI responses: ${stats.totalAIResponses}\n• Vision: ${stats.totalVisionRequests}\n• Voice: ${stats.totalVoiceTranscriptions || 0}\n• Alerts: ${stats.totalKeywordAlerts}\n• Banned: ${bannedUsers.size}`
+                        `⚡ *TAM AI — Status*\n\n🟢 Online & Running\n⏱ Uptime: ${uStr}\n🕐 ${now}\n\n🤖 *AI:* ${aiInfo.model}\n• Active chats: ${aiInfo.activeConversations}\n• Total calls: ${aiInfo.totalCalls}\n\n📊 *Stats:*\n• Messages: ${stats.totalMessages}\n• AI responses: ${stats.totalAIResponses}\n• Vision: ${stats.totalVisionRequests}\n• Voice: ${stats.totalVoiceTranscriptions || 0}\n• Alerts: ${stats.totalKeywordAlerts}\n• Banned: ${bannedUsers.size}`
                     );
                     return;
                 }
@@ -466,7 +508,7 @@ async function startAssistant() {
                     const topUsers = Object.entries(stats.perUser || {})
                         .sort((a, b) => b[1].messages - a[1].messages)
                         .slice(0, 10);
-                    let msg2 = `📊 *OpenClaw — Usage Stats*\n\n📨 Messages: *${stats.totalMessages}*\n🤖 AI Responses: *${stats.totalAIResponses}*\n🔍 Vision: *${stats.totalVisionRequests}*\n🎙 Voice: *${stats.totalVoiceTranscriptions || 0}*\n🔔 Alerts: *${stats.totalKeywordAlerts}*\n\n`;
+                    let msg2 = `📊 *TAM AI — Usage Stats*\n\n📨 Messages: *${stats.totalMessages}*\n🤖 AI Responses: *${stats.totalAIResponses}*\n🔍 Vision: *${stats.totalVisionRequests}*\n🎙 Voice: *${stats.totalVoiceTranscriptions || 0}*\n🔔 Alerts: *${stats.totalKeywordAlerts}*\n\n`;
                     if (topUsers.length > 0) {
                         msg2 += `👥 *Top Users:*\n`;
                         topUsers.forEach(([jid, u], i) => {
