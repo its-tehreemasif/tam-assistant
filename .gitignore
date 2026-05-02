@@ -1,0 +1,11 @@
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+session_assistant/
+auth_info_baileys/
+*.json
+!package.json
+!app.json
+database/*.json
