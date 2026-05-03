@@ -165,56 +165,76 @@ function parseRemindTime(str) {
     return ms;
 }
 
-// ─── Command: Help ────────────────────────────────────────────────────────────
+// ─── Command: Help (text fallback for dashboard) ──────────────────────────────
 function getHelp() {
-    return `🤖 *TAM AI — Command Guide*
-━━━━━━━━━━━━━━━━━━━━━
+    return `🤖 *TAM AI — Command Guide*\n━━━━━━━━━━━━━━━━━━━━━\n\n💬 *AI & Vision:*\n• @TAM _[message]_ — Chat with AI\n• !vision — Analyze an image\n• !export — Get your AI chat history\n\n🎙 *Voice:*\n• Send a voice note in DM — auto-transcribes\n• !transcribe — Transcribe voice in a group\n\n📝 *Notes:*  !note add/list/search/del/clear\n⏰ *Reminders:*  !remind [time] [text]\n🌍 *Live Data:*  !weather  !time\n🔧 *Utilities:*  !translate  !calc  !qod  !ping  !reset  !status\n🔒 *Owner:*  !ban  !unban  !banlist  !keyword  !stats  !reset all\n━━━━━━━━━━━━━━━━━━━━━\n_Powered by TAM Tech_ 🚀`;
+}
 
-💬 *AI & Vision:*
-• @TAM _[message]_ — Chat with AI
-• _.vision_ — Analyze an image (send/reply to photo)
-• _.vision [question]_ — Ask about an image
-• _.export_ — Get your full AI chat history
-
-🎙 *Voice:*
-• Send a voice note in DM — auto-transcribes
-• _.transcribe_ — reply to a voice note in a group to transcribe it
-
-📝 *Notes:*
-• _.note add [text]_ — Save a note
-• _.note list_ — View all notes
-• _.note search [keyword]_ — Search your notes
-• _.note del [#]_ — Delete note by number
-• _.note clear_ — Delete all notes
-
-⏰ *Reminders:*
-• _.remind [time] [text]_ — Set reminder
-• _.remind list_ — View pending reminders
-• _.remind cancel [#]_ — Cancel a reminder
-  _e.g. .remind 30min Call client_
-
-🌍 *Live Data:*
-• _.weather [city]_ — Current weather anywhere
-• _.time [city]_ — Current time in any timezone
-
-🔧 *Utilities:*
-• _.translate [lang] [text]_ — Translate anything
-• _.calc [expression]_ — Quick math
-• _.qod_ — Quote of the day
-• _.ping_ — Check if bot is alive
-• _.reset_ — Clear your AI chat history
-• _.export_ — Get your full AI chat history
-• _.status_ — Bot uptime & stats
-• _.help_ — Show this guide
-
-🔒 *Owner Commands:*
-• _.ban_ / _.unban_ @user
-• _.banlist_ — View banned users
-• _.keyword list/add/del_ — Manage alert keywords
-• _.stats_ — Detailed statistics
-• _.reset all_ — Clear all conversations
-━━━━━━━━━━━━━━━━━━━━━
-_Powered by TAM Tech_ 🚀`;
+// ─── Command: Help (interactive list message) ─────────────────────────────────
+async function sendHelpList(sock, msg, from) {
+    try {
+        await sock.sendMessage(from, {
+            text: '👇 *Pick a category to see commands:*',
+            footer: 'Powered by TAM Tech 🚀',
+            title: '🤖 TAM AI — Command Guide',
+            buttonText: '📋 View Commands',
+            sections: [
+                {
+                    title: '💬 AI & Vision',
+                    rows: [
+                        { title: '@TAM [message]', rowId: 'h_ai',        description: 'Chat with AI' },
+                        { title: '!vision',         rowId: 'h_vision',    description: 'Analyze image / photo' },
+                        { title: '!vision [q]',     rowId: 'h_visionq',   description: 'Ask a question about an image' },
+                        { title: '!export',         rowId: 'h_export',    description: 'Export your AI chat history' },
+                    ]
+                },
+                {
+                    title: '🎙 Voice & Transcription',
+                    rows: [
+                        { title: 'Send voice note (DM)', rowId: 'h_voice',      description: 'Auto-transcribes instantly' },
+                        { title: '!transcribe',           rowId: 'h_transcribe', description: 'Reply to a voice note in groups' },
+                    ]
+                },
+                {
+                    title: '📝 Notes & Reminders',
+                    rows: [
+                        { title: '!note add [text]',    rowId: 'h_note_add',    description: 'Save a quick note' },
+                        { title: '!note list',           rowId: 'h_note_list',   description: 'View all your notes' },
+                        { title: '!note search [kw]',   rowId: 'h_note_search', description: 'Search through notes' },
+                        { title: '!note del [#]',        rowId: 'h_note_del',    description: 'Delete note by number' },
+                        { title: '!remind [time] [msg]', rowId: 'h_remind',      description: 'e.g. !remind 30min Call client' },
+                        { title: '!remind list',         rowId: 'h_remind_list', description: 'View pending reminders' },
+                        { title: '!remind cancel [#]',   rowId: 'h_remind_can',  description: 'Cancel a reminder' },
+                    ]
+                },
+                {
+                    title: '🌍 Live Data & Utilities',
+                    rows: [
+                        { title: '!weather [city]',       rowId: 'h_weather',   description: 'Current weather anywhere' },
+                        { title: '!time [city]',           rowId: 'h_time',      description: 'Current time in any timezone' },
+                        { title: '!translate [lang] [txt]',rowId: 'h_translate', description: 'Translate anything' },
+                        { title: '!calc [expression]',    rowId: 'h_calc',      description: 'Quick math calculator' },
+                        { title: '!qod',                   rowId: 'h_qod',       description: 'Quote of the day' },
+                    ]
+                },
+                {
+                    title: '⚙️ General & Owner',
+                    rows: [
+                        { title: '!ping',      rowId: 'h_ping',    description: 'Check if bot is alive' },
+                        { title: '!reset',     rowId: 'h_reset',   description: 'Clear your AI chat history' },
+                        { title: '!status',    rowId: 'h_status',  description: 'Bot uptime & stats (owner)' },
+                        { title: '!ban @user', rowId: 'h_ban',     description: 'Ban a user (owner only)' },
+                        { title: '!banlist',   rowId: 'h_banlist', description: 'View banned users (owner)' },
+                        { title: '!keyword',   rowId: 'h_kw',      description: 'Manage alert keywords (owner)' },
+                        { title: '!stats',     rowId: 'h_stats',   description: 'Detailed usage stats (owner)' },
+                    ]
+                },
+            ]
+        }, { quoted: msg });
+    } catch {
+        // Fall back to plain text if list message fails (e.g. old WhatsApp version)
+        await reply(sock, msg, getHelp());
+    }
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -269,7 +289,7 @@ async function startAssistant() {
 
             // Send a startup ping to Note to Self so we can confirm connection + sending works
             try {
-                await sock.sendMessage(ownerJid, { text: `✅ *TAM is online*\n_Send .ping to confirm I can read your messages too._` });
+                await sock.sendMessage(ownerJid, { text: `✅ *TAM is online*\n_Send !ping to confirm I can read your messages too._` });
             } catch (e) {
                 console.error(chalk.red('[STARTUP MSG ERROR]'), e.message);
             }
@@ -429,11 +449,11 @@ async function startAssistant() {
             // =================================================================
             // 🎙 .TRANSCRIBE — manual command for groups (reply to a voice note)
             // =================================================================
-            if (textLower === '.transcribe') {
+            if (textLower === '!transcribe') {
                 const effectiveMsgContent = unwrapMessage(msg);
                 const quotedMsg = effectiveMsgContent?.extendedTextMessage?.contextInfo?.quotedMessage;
                 if (!quotedMsg) {
-                    await reply(sock, msg, `❌ *Reply to a voice note* with .transcribe`);
+                    await reply(sock, msg, `❌ *Reply to a voice note* with !transcribe`);
                     return;
                 }
                 // Build a fake message wrapper so transcribeVoice can download it
@@ -473,23 +493,23 @@ async function startAssistant() {
             // =================================================================
 
             // .ping
-            if (textLower === '.ping') {
+            if (textLower === '!ping') {
                 await reply(sock, msg, `🏓 *Pong!* ⚡\n_TAM AI is alive._`);
                 return;
             }
 
             // .help — owner only
-            if (textLower === '.help') {
+            if (textLower === '!help') {
                 if (!isOwner) {
                     await reply(sock, msg, `🔒 *Restricted*\n_This command is only available to the owner._\n_Contact *Taha* if you need assistance._`);
                 } else {
-                    await reply(sock, msg, getHelp());
+                    await sendHelpList(sock, msg, from);
                 }
                 return;
             }
 
             // .reset (own conversation)
-            if (textLower === '.reset') {
+            if (textLower === '!reset') {
                 ai.resetConversation(participant);
                 imageContext = persistence.getImageContext();
                 imageContext.delete(participant);
@@ -499,12 +519,12 @@ async function startAssistant() {
             }
 
             // .vision
-            if (textLower.startsWith('.vision')) {
+            if (textLower.startsWith('!vision')) {
                 console.log(chalk.green(`[VISION] Request from ${pushName}`));
                 await react(sock, msg, '⚡');
                 await sock.sendPresenceUpdate('recording', from);
 
-                const userQuestion = text.replace(/^\.vision\s*/i, '').trim();
+                const userQuestion = text.replace(/^!vision\s*/i, '').trim();
                 const result       = await analyzeImage(sock, msg, userQuestion);
 
                 if (result.success) {
@@ -536,18 +556,18 @@ async function startAssistant() {
             }
 
             // .note
-            if (textLower.startsWith('.note')) {
-                const parts  = text.replace(/^\.note\s*/i, '').trim();
+            if (textLower.startsWith('!note')) {
+                const parts  = text.replace(/^!note\s*/i, '').trim();
                 const cmd    = parts.split(' ')[0]?.toLowerCase();
                 const body   = parts.replace(/^\S+\s*/, '').trim();
                 const notes  = persistence.getNotes(participant);
 
                 if (cmd === 'add' && body) {
                     await persistence.addNote(participant, body);
-                    await reply(sock, msg, `📝 *Note saved!*\n\n"${body}"\n\n_You have ${notes.length + 1} note(s). Use .note list to view._`);
+                    await reply(sock, msg, `📝 *Note saved!*\n\n"${body}"\n\n_You have ${notes.length + 1} note(s). Use !note list to view._`);
                 } else if (cmd === 'list') {
                     if (notes.length === 0) {
-                        await reply(sock, msg, `📋 *Notes*\n\n_No notes yet. Use .note add [text] to add one._`);
+                        await reply(sock, msg, `📋 *Notes*\n\n_No notes yet. Use !note add [text] to add one._`);
                     } else {
                         const list = notes.map((n, i) => `${i + 1}. ${n.text}\n   _${n.createdAt}_`).join('\n\n');
                         await reply(sock, msg, `📋 *Your Notes (${notes.length})*\n\n${list}`);
@@ -555,7 +575,7 @@ async function startAssistant() {
                 } else if (cmd === 'del' || cmd === 'delete') {
                     const idx = parseInt(body) - 1;
                     if (isNaN(idx)) {
-                        await reply(sock, msg, `❌ *Usage:* .note del [number]\n_e.g. .note del 2_`);
+                        await reply(sock, msg, `❌ *Usage:* !note del [number]\n_e.g. !note del 2_`);
                     } else {
                         const deleted = await persistence.deleteNote(participant, idx);
                         await reply(sock, msg, deleted
@@ -565,7 +585,7 @@ async function startAssistant() {
                     }
                 } else if (cmd === 'search') {
                     if (!body) {
-                        await reply(sock, msg, `🔍 *Usage:* .note search [keyword]`);
+                        await reply(sock, msg, `🔍 *Usage:* !note search [keyword]`);
                     } else {
                         const results = notes
                             .map((n, i) => ({ ...n, idx: i + 1 }))
@@ -581,26 +601,26 @@ async function startAssistant() {
                     await persistence.clearNotes(participant);
                     await reply(sock, msg, `🧹 *All notes cleared.*`);
                 } else {
-                    await reply(sock, msg, `📝 *Notes Commands:*\n• .note add [text]\n• .note list\n• .note search [keyword]\n• .note del [#]\n• .note clear`);
+                    await reply(sock, msg, `📝 *Notes Commands:*\n• !note add [text]\n• !note list\n• !note search [keyword]\n• !note del [#]\n• !note clear`);
                 }
                 return;
             }
 
             // .remind
-            if (textLower.startsWith('.remind')) {
-                const body = text.replace(/^\.remind\s*/i, '').trim();
+            if (textLower.startsWith('!remind')) {
+                const body = text.replace(/^!remind\s*/i, '').trim();
 
                 // .remind list
                 if (!body || body.toLowerCase() === 'list') {
                     const all = persistence.getReminders().filter(r => r.userId === participant);
                     if (all.length === 0) {
-                        await reply(sock, msg, `📋 *No pending reminders.*\n_Use .remind [time] [text] to set one._`);
+                        await reply(sock, msg, `📋 *No pending reminders.*\n_Use !remind [time] [text] to set one._`);
                     } else {
                         const list = all.map((r, i) => {
                             const fireTime = moment(r.fireAt).tz('Asia/Karachi').format('hh:mm A, DD MMM');
                             return `${i + 1}. 📌 "${r.text}"\n   🕐 ${fireTime}`;
                         }).join('\n\n');
-                        await reply(sock, msg, `⏰ *Pending Reminders (${all.length})*\n\n${list}\n\n_Use .remind cancel [#] to cancel one._`);
+                        await reply(sock, msg, `⏰ *Pending Reminders (${all.length})*\n\n${list}\n\n_Use !remind cancel [#] to cancel one._`);
                     }
                     return;
                 }
@@ -610,7 +630,7 @@ async function startAssistant() {
                     const idx = parseInt(body.replace(/^cancel\s+/i, '')) - 1;
                     const all = persistence.getReminders().filter(r => r.userId === participant);
                     if (idx < 0 || idx >= all.length) {
-                        await reply(sock, msg, `❌ *Invalid number.* Use .remind list to see your reminders.`);
+                        await reply(sock, msg, `❌ *Invalid number.* Use !remind list to see your reminders.`);
                         return;
                     }
                     const r = all[idx];
@@ -625,7 +645,7 @@ async function startAssistant() {
                 // .remind [time] [text]
                 const timeMatch = body.match(/^([\d\s]+(?:h(?:our)?s?|m(?:in)?s?|s(?:ec)?s?)\s*)+/i);
                 if (!timeMatch) {
-                    await reply(sock, msg, `❌ *Invalid format.*\n_Examples:_\n• .remind 30min Call client\n• .remind 2h Check emails\n• .remind list\n• .remind cancel 1`);
+                    await reply(sock, msg, `❌ *Invalid format.*\n_Examples:_\n• !remind 30min Call client\n• !remind 2h Check emails\n• !remind list\n• !remind cancel 1`);
                     return;
                 }
 
@@ -660,7 +680,7 @@ async function startAssistant() {
             // =================================================================
             if (isOwner) {
                 // .status
-                if (textLower === '.status') {
+                if (textLower === '!status') {
                     stats          = persistence.getStats();
                     bannedUsers    = persistence.getBanned();
                     const uptime   = Date.now() - startTime;
@@ -677,7 +697,7 @@ async function startAssistant() {
                 }
 
                 // .stats
-                if (textLower === '.stats') {
+                if (textLower === '!stats') {
                     stats = persistence.getStats();
                     const topUsers = Object.entries(stats.perUser || {})
                         .sort((a, b) => b[1].messages - a[1].messages)
@@ -694,7 +714,7 @@ async function startAssistant() {
                 }
 
                 // .reset all
-                if (textLower === '.reset all') {
+                if (textLower === '!reset all') {
                     const count = ai.conversations.size;
                     ai.conversations.clear();
                     await reply(sock, msg, `🧹 *All ${count} conversation(s) cleared.*`);
@@ -702,30 +722,30 @@ async function startAssistant() {
                 }
 
                 // .ban
-                if (textLower.startsWith('.ban') && !textLower.startsWith('.banlist')) {
+                if (textLower.startsWith('!ban') && !textLower.startsWith('!banlist')) {
                     const mentioned = unwrapMessage(msg)?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                     let targetJid   = mentioned[0];
                     if (!targetJid) {
-                        const raw = text.replace(/^\.ban\s*/i, '').replace(/[^0-9]/g, '').trim();
+                        const raw = text.replace(/^!ban\s*/i, '').replace(/[^0-9]/g, '').trim();
                         if (raw.length >= 10) targetJid = raw + '@s.whatsapp.net';
                     }
-                    if (!targetJid) { await reply(sock, msg, '❌ *Usage:* .ban @user _or_ .ban 923xxxxxxxxx'); return; }
+                    if (!targetJid) { await reply(sock, msg, '❌ *Usage:* !ban @user _or_ !ban 923xxxxxxxxx'); return; }
                     if (targetJid === ownerJid) { await reply(sock, msg, `😅 _You can't ban yourself!_`); return; }
                     bannedUsers.add(targetJid);
                     await persistence.setBanned(bannedUsers);
-                    await reply(sock, msg, `🚫 *Banned:* +${targetJid.split('@')[0]}\n_Use .unban to reverse._`);
+                    await reply(sock, msg, `🚫 *Banned:* +${targetJid.split('@')[0]}\n_Use !unban to reverse._`);
                     return;
                 }
 
                 // .unban
-                if (textLower.startsWith('.unban')) {
+                if (textLower.startsWith('!unban')) {
                     const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
                     let targetJid   = mentioned[0];
                     if (!targetJid) {
-                        const raw = text.replace(/^\.unban\s*/i, '').replace(/[^0-9]/g, '').trim();
+                        const raw = text.replace(/^!unban\s*/i, '').replace(/[^0-9]/g, '').trim();
                         if (raw.length >= 10) targetJid = raw + '@s.whatsapp.net';
                     }
-                    if (!targetJid) { await reply(sock, msg, '❌ *Usage:* .unban @user _or_ .unban 923xxxxxxxxx'); return; }
+                    if (!targetJid) { await reply(sock, msg, '❌ *Usage:* !unban @user _or_ !unban 923xxxxxxxxx'); return; }
                     bannedUsers.delete(targetJid);
                     await persistence.setBanned(bannedUsers);
                     await reply(sock, msg, `✅ *Unbanned:* +${targetJid.split('@')[0]}`);
@@ -733,8 +753,8 @@ async function startAssistant() {
                 }
 
                 // .keyword — manage alert keywords
-                if (textLower.startsWith('.keyword')) {
-                    const kParts = text.replace(/^\.keyword\s*/i, '').trim();
+                if (textLower.startsWith('!keyword')) {
+                    const kParts = text.replace(/^!keyword\s*/i, '').trim();
                     const kCmd   = kParts.split(' ')[0]?.toLowerCase();
                     const kWord  = kParts.replace(/^\S+\s*/, '').trim();
                     if (!kCmd || kCmd === 'list') {
@@ -759,7 +779,7 @@ async function startAssistant() {
                 }
 
                 // .banlist
-                if (textLower === '.banlist') {
+                if (textLower === '!banlist') {
                     bannedUsers = persistence.getBanned();
                     if (bannedUsers.size === 0) {
                         await reply(sock, msg, `📋 *Ban List*\n\n_No banned users._ ✅`);
@@ -776,11 +796,11 @@ async function startAssistant() {
             // =================================================================
             // 🌐 .TRANSLATE — translate text using AI
             // =================================================================
-            if (textLower.startsWith('.translate')) {
-                const parts    = text.replace(/^\.translate\s*/i, '').trim();
+            if (textLower.startsWith('!translate')) {
+                const parts    = text.replace(/^!translate\s*/i, '').trim();
                 const spaceIdx = parts.indexOf(' ');
                 if (spaceIdx === -1) {
-                    await reply(sock, msg, `🌐 *Usage:* .translate [language] [text]\n_e.g. .translate arabic Good morning_`);
+                    await reply(sock, msg, `🌐 *Usage:* !translate [language] [text]\n_e.g. !translate arabic Good morning_`);
                     return;
                 }
                 const lang     = parts.substring(0, spaceIdx);
@@ -801,10 +821,10 @@ async function startAssistant() {
             // =================================================================
             // 🧮 .CALC — quick calculations using AI
             // =================================================================
-            if (textLower.startsWith('.calc')) {
-                const expr = text.replace(/^\.calc\s*/i, '').trim();
+            if (textLower.startsWith('!calc')) {
+                const expr = text.replace(/^!calc\s*/i, '').trim();
                 if (!expr) {
-                    await reply(sock, msg, `🧮 *Usage:* .calc [expression]\n_e.g. .calc 15% of 85000_`);
+                    await reply(sock, msg, `🧮 *Usage:* !calc [expression]\n_e.g. !calc 15% of 85000_`);
                     return;
                 }
                 await react(sock, msg, '🧮');
@@ -821,7 +841,7 @@ async function startAssistant() {
             // =================================================================
             // ✨ .QOD — quote of the day on demand
             // =================================================================
-            if (textLower === '.qod') {
+            if (textLower === '!qod') {
                 await react(sock, msg, '✨');
                 await sock.sendPresenceUpdate('recording', from);
                 const qKey   = participant + '_qod';
@@ -838,7 +858,7 @@ async function startAssistant() {
             // =================================================================
             // 📤 .EXPORT — send AI chat history as text
             // =================================================================
-            if (textLower === '.export') {
+            if (textLower === '!export') {
                 const history = ai.getHistory(participant);
                 if (history.length === 0) {
                     await reply(sock, msg, `📭 *No chat history to export.*\n_Start a conversation with @TAM first._`);
@@ -856,8 +876,8 @@ async function startAssistant() {
             // =================================================================
             // 🌤 .WEATHER — live weather via wttr.in (no API key needed)
             // =================================================================
-            if (textLower.startsWith('.weather')) {
-                const city = text.replace(/^\.weather\s*/i, '').trim() || 'Karachi';
+            if (textLower.startsWith('!weather')) {
+                const city = text.replace(/^!weather\s*/i, '').trim() || 'Karachi';
                 await react(sock, msg, '🌤');
                 await sock.sendPresenceUpdate('recording', from);
                 try {
@@ -895,8 +915,8 @@ async function startAssistant() {
             // =================================================================
             // 🕐 .TIME — current time in any city/timezone
             // =================================================================
-            if (textLower.startsWith('.time')) {
-                const input = text.replace(/^\.time\s*/i, '').trim();
+            if (textLower.startsWith('!time')) {
+                const input = text.replace(/^!time\s*/i, '').trim();
                 if (!input) {
                     const now = moment().tz('Asia/Karachi').format('hh:mm A');
                     const date = moment().tz('Asia/Karachi').format('DD MMM YYYY');
