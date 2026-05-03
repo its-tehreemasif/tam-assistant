@@ -267,8 +267,14 @@ async function startAssistant() {
             initScheduler(sock, ownerJid, () => persistence, () => ai);
             rescheduleAllReminders(sock);
 
+            // Send a startup ping to Note to Self so we can confirm connection + sending works
+            try {
+                await sock.sendMessage(ownerJid, { text: `✅ *TAM is online*\n_Send .ping to confirm I can read your messages too._` });
+            } catch (e) {
+                console.error(chalk.red('[STARTUP MSG ERROR]'), e.message);
+            }
+
             if (wasConnected) {
-                // Was previously connected — this is a reconnection
                 await sendReconnectAlert(sock, ownerJid);
             }
             wasConnected = true;
@@ -305,6 +311,8 @@ async function startAssistant() {
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         // Guard: if a newer socket has taken over, discard events from this old one
         if (sock !== _sockRef) return;
+        // Only process new real-time messages — skip history sync replays
+        if (chatUpdate.type !== 'notify') return;
         try {
             const msg = chatUpdate.messages[0];
             if (!msg) return;
