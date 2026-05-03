@@ -217,9 +217,9 @@ _Powered by TAM Tech_ 🚀`;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-let _starting       = false;
-let _reconnectTimer = null; // single pending reconnect — cancelled if socket opens successfully
-let _startupSent    = false; // only send "TAM is online" once per process lifetime
+let _starting          = false;
+let _reconnectTimer    = null;  // single pending reconnect — cancelled if socket opens successfully
+let _lastStartupMsgKey = null;  // key of last "TAM is online" message — deleted before sending the next
 async function startAssistant() {
     if (_starting) { console.log(chalk.yellow('[TAM] Already starting, skipping duplicate call.')); return; }
     _starting = true;
@@ -267,14 +267,18 @@ async function startAssistant() {
             initScheduler(sock, ownerJid, () => persistence, () => ai);
             rescheduleAllReminders(sock);
 
-            // Send startup ping to Note to Self — only once per process (not on every reconnect)
-            if (!_startupSent) {
-                _startupSent = true;
-                try {
-                    await sock.sendMessage(ownerJid, { text: `✅ *TAM is online*\n_Send !ping to confirm I can read your messages too._` });
-                } catch (e) {
-                    console.error(chalk.red('[STARTUP MSG ERROR]'), e.message);
+            // Send startup ping to Note to Self — delete the previous one first so there's never a pile-up
+            try {
+                if (_lastStartupMsgKey) {
+                    await sock.sendMessage(ownerJid, { delete: _lastStartupMsgKey });
+                    _lastStartupMsgKey = null;
                 }
+                const sent = await sock.sendMessage(ownerJid, {
+                    text: `✅ *TAM is online*\n_${wasConnected ? 'Reconnected after a drop.' : 'Send !ping to confirm I can read your messages.'}_`
+                });
+                _lastStartupMsgKey = sent?.key || null;
+            } catch (e) {
+                console.error(chalk.red('[STARTUP MSG ERROR]'), e.message);
             }
 
             if (wasConnected) {
@@ -633,7 +637,7 @@ async function startAssistant() {
                 const reminderText = body.replace(timeMatch[0], '').trim();
 
                 if (!reminderText) {
-                    await reply(sock, msg, `❌ *Please include a message.*\n_e.g. .remind 30min Call the client_`);
+                    await reply(sock, msg, `❌ *Please include a message.*\n_e.g. !remind 30min Call the client_`);
                     return;
                 }
 
@@ -719,7 +723,7 @@ async function startAssistant() {
 
                 // .unban
                 if (textLower.startsWith('!unban')) {
-                    const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                    const mentioned = unwrapMessage(msg)?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                     let targetJid   = mentioned[0];
                     if (!targetJid) {
                         const raw = text.replace(/^!unban\s*/i, '').replace(/[^0-9]/g, '').trim();
@@ -739,7 +743,7 @@ async function startAssistant() {
                     const kWord  = kParts.replace(/^\S+\s*/, '').trim();
                     if (!kCmd || kCmd === 'list') {
                         const kws = persistence.getKeywords();
-                        await reply(sock, msg, `🔔 *Alert Keywords (${kws.length})*\n\n${kws.map((k, i) => `${i + 1}. ${k}`).join('\n')}\n\n_Use .keyword add [word] or .keyword del [word]_`);
+                        await reply(sock, msg, `🔔 *Alert Keywords (${kws.length})*\n\n${kws.map((k, i) => `${i + 1}. ${k}`).join('\n')}\n\n_Use !keyword add [word] or !keyword del [word]_`);
                     } else if (kCmd === 'add' && kWord) {
                         const added = await persistence.addKeyword(kWord);
                         await reply(sock, msg, added
@@ -753,7 +757,7 @@ async function startAssistant() {
                             : `❌ *"${kWord}" not found.*`
                         );
                     } else {
-                        await reply(sock, msg, `🔔 *Keyword Commands:*\n• .keyword list\n• .keyword add [word]\n• .keyword del [word]`);
+                        await reply(sock, msg, `🔔 *Keyword Commands:*\n• !keyword list\n• !keyword add [word]\n• !keyword del [word]`);
                     }
                     return;
                 }
