@@ -402,7 +402,7 @@ async function startAssistant() {
                 // Auto-transcribe in DMs only
                 console.log(chalk.magenta(`[VOICE] Auto-transcribing DM voice note from ${pushName}`));
                 await react(sock, msg, '🎙');
-                await sock.sendPresenceUpdate('composing', from);
+                await sock.sendPresenceUpdate('recording', from);
 
                 const result = await transcribeVoice(msg, config.aiApiKey);
                 await persistence.incrementStat('totalVoiceTranscriptions', participant);
@@ -445,7 +445,7 @@ async function startAssistant() {
 
                 console.log(chalk.magenta(`[VOICE] Manual transcribe in group by ${pushName}`));
                 await react(sock, msg, '🎙');
-                await sock.sendPresenceUpdate('composing', from);
+                await sock.sendPresenceUpdate('recording', from);
 
                 const result = await transcribeVoice(fakeMsg, config.aiApiKey);
                 await persistence.incrementStat('totalVoiceTranscriptions', participant);
@@ -502,7 +502,7 @@ async function startAssistant() {
             if (textLower.startsWith('.vision')) {
                 console.log(chalk.green(`[VISION] Request from ${pushName}`));
                 await react(sock, msg, '⚡');
-                await sock.sendPresenceUpdate('composing', from);
+                await sock.sendPresenceUpdate('recording', from);
 
                 const userQuestion = text.replace(/^\.vision\s*/i, '').trim();
                 const result       = await analyzeImage(sock, msg, userQuestion);
@@ -786,7 +786,7 @@ async function startAssistant() {
                 const lang     = parts.substring(0, spaceIdx);
                 const toTranslate = parts.substring(spaceIdx + 1).trim();
                 await react(sock, msg, '🌐');
-                await sock.sendPresenceUpdate('composing', from);
+                await sock.sendPresenceUpdate('recording', from);
                 const tKey   = participant + '_translate';
                 const result = await ai.chat(tKey, `Translate the following text to ${lang}. Return ONLY the translated text, nothing else:\n\n"${toTranslate}"`);
                 ai.resetConversation(tKey);
@@ -823,7 +823,7 @@ async function startAssistant() {
             // =================================================================
             if (textLower === '.qod') {
                 await react(sock, msg, '✨');
-                await sock.sendPresenceUpdate('composing', from);
+                await sock.sendPresenceUpdate('recording', from);
                 const qKey   = participant + '_qod';
                 const result = await ai.chat(qKey, 'Give me one powerful motivational quote with author name. Format exactly: "Quote" — Author. Nothing else.');
                 ai.resetConversation(qKey);
@@ -859,7 +859,7 @@ async function startAssistant() {
             if (textLower.startsWith('.weather')) {
                 const city = text.replace(/^\.weather\s*/i, '').trim() || 'Karachi';
                 await react(sock, msg, '🌤');
-                await sock.sendPresenceUpdate('composing', from);
+                await sock.sendPresenceUpdate('recording', from);
                 try {
                     const res = await axios.get(
                         `https://wttr.in/${encodeURIComponent(city)}?format=j1`,
@@ -964,7 +964,7 @@ async function startAssistant() {
 
                 console.log(chalk.cyan(`[AI] Responding to ${pushName}`));
                 await react(sock, msg, '⚡');
-                await sock.sendPresenceUpdate('composing', from);
+                await sock.sendPresenceUpdate('recording', from);
 
                 let userMessage = text.replace(/@\S+/g, '').trim();
 
