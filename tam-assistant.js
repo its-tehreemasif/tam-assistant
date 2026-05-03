@@ -391,7 +391,8 @@ async function startAssistant() {
             // 🎙 .TRANSCRIBE — manual command for groups (reply to a voice note)
             // =================================================================
             if (textLower === '.transcribe') {
-                const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+                const effectiveMsgContent = unwrapMessage(msg);
+                const quotedMsg = effectiveMsgContent?.extendedTextMessage?.contextInfo?.quotedMessage;
                 if (!quotedMsg) {
                     await reply(sock, msg, `❌ *Reply to a voice note* with .transcribe`);
                     return;
@@ -663,7 +664,7 @@ async function startAssistant() {
 
                 // .ban
                 if (textLower.startsWith('.ban') && !textLower.startsWith('.banlist')) {
-                    const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                    const mentioned = unwrapMessage(msg)?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                     let targetJid   = mentioned[0];
                     if (!targetJid) {
                         const raw = text.replace(/^\.ban\s*/i, '').replace(/[^0-9]/g, '').trim();
