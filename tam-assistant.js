@@ -107,9 +107,9 @@ async function reply(sock, msg, text) {
     console.log(chalk.blue(`[REPLY] Sending to ${to}: "${String(text).substring(0, 60)}"`));
     try {
         if (msg.key.id?.startsWith('DASH_')) {
-            await sock.sendMessage(to, { text, ai: true });
+            await sock.sendMessage(to, { text });
         } else {
-            await sock.sendMessage(to, { text, ai: true }, { quoted: msg });
+            await sock.sendMessage(to, { text }, { quoted: msg });
         }
     } catch (e) {
         console.error(chalk.red(`[REPLY ERROR] ${e.message}`));
@@ -170,76 +170,56 @@ function getHelp() {
     return `🤖 *TAM AI — Command Guide*\n━━━━━━━━━━━━━━━━━━━━━\n\n💬 *AI & Vision:*\n• @TAM _[message]_ — Chat with AI\n• !vision — Analyze an image\n• !export — Get your AI chat history\n\n🎙 *Voice:*\n• Send a voice note in DM — auto-transcribes\n• !transcribe — Transcribe voice in a group\n\n📝 *Notes:*  !note add/list/search/del/clear\n⏰ *Reminders:*  !remind [time] [text]\n🌍 *Live Data:*  !weather  !time\n🔧 *Utilities:*  !translate  !calc  !qod  !ping  !reset  !status\n🔒 *Owner:*  !ban  !unban  !banlist  !keyword  !stats  !reset all\n━━━━━━━━━━━━━━━━━━━━━\n_Powered by TAM Tech_ 🚀`;
 }
 
-// ─── Command: Help (interactive list message) ─────────────────────────────────
-async function sendHelpList(sock, msg, from) {
-    try {
-        await sock.sendMessage(from, {
-            text: '👇 *Pick a category to see commands:*',
-            footer: 'Powered by TAM Tech 🚀',
-            title: '🤖 TAM AI — Command Guide',
-            buttonText: '📋 View Commands',
-            sections: [
-                {
-                    title: '💬 AI & Vision',
-                    rows: [
-                        { title: '@TAM [message]', rowId: 'h_ai',        description: 'Chat with AI' },
-                        { title: '!vision',         rowId: 'h_vision',    description: 'Analyze image / photo' },
-                        { title: '!vision [q]',     rowId: 'h_visionq',   description: 'Ask a question about an image' },
-                        { title: '!export',         rowId: 'h_export',    description: 'Export your AI chat history' },
-                    ]
-                },
-                {
-                    title: '🎙 Voice & Transcription',
-                    rows: [
-                        { title: 'Send voice note (DM)', rowId: 'h_voice',      description: 'Auto-transcribes instantly' },
-                        { title: '!transcribe',           rowId: 'h_transcribe', description: 'Reply to a voice note in groups' },
-                    ]
-                },
-                {
-                    title: '📝 Notes & Reminders',
-                    rows: [
-                        { title: '!note add [text]',    rowId: 'h_note_add',    description: 'Save a quick note' },
-                        { title: '!note list',           rowId: 'h_note_list',   description: 'View all your notes' },
-                        { title: '!note search [kw]',   rowId: 'h_note_search', description: 'Search through notes' },
-                        { title: '!note del [#]',        rowId: 'h_note_del',    description: 'Delete note by number' },
-                        { title: '!remind [time] [msg]', rowId: 'h_remind',      description: 'e.g. !remind 30min Call client' },
-                        { title: '!remind list',         rowId: 'h_remind_list', description: 'View pending reminders' },
-                        { title: '!remind cancel [#]',   rowId: 'h_remind_can',  description: 'Cancel a reminder' },
-                    ]
-                },
-                {
-                    title: '🌍 Live Data & Utilities',
-                    rows: [
-                        { title: '!weather [city]',       rowId: 'h_weather',   description: 'Current weather anywhere' },
-                        { title: '!time [city]',           rowId: 'h_time',      description: 'Current time in any timezone' },
-                        { title: '!translate [lang] [txt]',rowId: 'h_translate', description: 'Translate anything' },
-                        { title: '!calc [expression]',    rowId: 'h_calc',      description: 'Quick math calculator' },
-                        { title: '!qod',                   rowId: 'h_qod',       description: 'Quote of the day' },
-                    ]
-                },
-                {
-                    title: '⚙️ General & Owner',
-                    rows: [
-                        { title: '!ping',      rowId: 'h_ping',    description: 'Check if bot is alive' },
-                        { title: '!reset',     rowId: 'h_reset',   description: 'Clear your AI chat history' },
-                        { title: '!status',    rowId: 'h_status',  description: 'Bot uptime & stats (owner)' },
-                        { title: '!ban @user', rowId: 'h_ban',     description: 'Ban a user (owner only)' },
-                        { title: '!banlist',   rowId: 'h_banlist', description: 'View banned users (owner)' },
-                        { title: '!keyword',   rowId: 'h_kw',      description: 'Manage alert keywords (owner)' },
-                        { title: '!stats',     rowId: 'h_stats',   description: 'Detailed usage stats (owner)' },
-                    ]
-                },
-            ]
-        }, { quoted: msg });
-    } catch {
-        // Fall back to plain text if list message fails (e.g. old WhatsApp version)
-        await reply(sock, msg, getHelp());
-    }
+// ─── Command: Help (formatted text) ───────────────────────────────────────────
+async function sendHelpList(sock, msg) {
+    const help = `🤖 *TAM AI — Command Guide*
+━━━━━━━━━━━━━━━━━━━━━
+
+💬 *AI & Vision*
+› @TAM _[message]_ — Chat with AI
+› !vision — Analyze a photo
+› !vision _[question]_ — Ask about an image
+› !export — Download your AI chat history
+
+🎙 *Voice*
+› Send a voice note (DM) — auto-transcribes
+› !transcribe — Transcribe voice in groups
+
+📝 *Notes*
+› !note add _[text]_
+› !note list / search _[kw]_ / del _[#]_ / clear
+
+⏰ *Reminders*
+› !remind _[time]_ _[text]_   e.g. !remind 30min Call client
+› !remind list / cancel _[#]_
+
+🌍 *Live Data*
+› !weather _[city]_
+› !time _[city/country]_
+› !translate _[lang]_ _[text]_
+› !calc _[expression]_
+› !qod — Quote of the day
+
+⚙️ *General*
+› !ping — Check if bot is alive
+› !reset — Clear your AI chat history
+› !status — Uptime & stats
+› !stats — Detailed usage stats
+
+🔒 *Owner Only*
+› !ban @user / !unban @user / !banlist
+› !keyword add/del/list
+› !reset all
+
+━━━━━━━━━━━━━━━━━━━━━
+_Powered by TAM Tech_ 🚀`;
+    await reply(sock, msg, help);
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 let _starting       = false;
 let _reconnectTimer = null; // single pending reconnect — cancelled if socket opens successfully
+let _startupSent    = false; // only send "TAM is online" once per process lifetime
 async function startAssistant() {
     if (_starting) { console.log(chalk.yellow('[TAM] Already starting, skipping duplicate call.')); return; }
     _starting = true;
@@ -287,11 +267,14 @@ async function startAssistant() {
             initScheduler(sock, ownerJid, () => persistence, () => ai);
             rescheduleAllReminders(sock);
 
-            // Send a startup ping to Note to Self so we can confirm connection + sending works
-            try {
-                await sock.sendMessage(ownerJid, { text: `✅ *TAM is online*\n_Send !ping to confirm I can read your messages too._` });
-            } catch (e) {
-                console.error(chalk.red('[STARTUP MSG ERROR]'), e.message);
+            // Send startup ping to Note to Self — only once per process (not on every reconnect)
+            if (!_startupSent) {
+                _startupSent = true;
+                try {
+                    await sock.sendMessage(ownerJid, { text: `✅ *TAM is online*\n_Send !ping to confirm I can read your messages too._` });
+                } catch (e) {
+                    console.error(chalk.red('[STARTUP MSG ERROR]'), e.message);
+                }
             }
 
             if (wasConnected) {
@@ -386,7 +369,7 @@ async function startAssistant() {
             const textLower   = text.toLowerCase().trim();
 
             // ─── Rate limiting + auto-ban ─────────────────────────────────────
-            // In groups: silently ignore violations — never spam the group chat
+            // Silently ignore — never send ban/rate-limit messages anywhere
             if (!isOwner && text) {
                 const check = rateLimiter.checkMessage(participant);
                 if (!check.allowed) {
@@ -395,23 +378,15 @@ async function startAssistant() {
                         bannedUsers.add(participant);
                         await persistence.setBanned(bannedUsers);
                         console.log(chalk.red(`[AUTOBAN] ${pushName} (${participant}) auto-banned for spam`));
-                        if (isDM) {
-                            await reply(sock, msg, `🚫 *Auto-Banned*\n_You've been restricted for excessive spamming._\n_Contact the owner to appeal._`);
-                        }
-                    } else if (isDM) {
-                        await reply(sock, msg, `⏳ *Slow down!*\n_Too many messages. Wait *${check.resetIn}s* before sending more._\n_Warning ${check.violations}/3 — repeated violations will result in a ban._`);
                     }
                     return;
                 }
             }
 
             // ─── Ban check ────────────────────────────────────────────────────
-            // In groups: silently ignore banned users — never reply publicly
+            // Silently ignore banned users everywhere
             bannedUsers = persistence.getBanned();
             if (bannedUsers.has(participant) && !isOwner) {
-                if (isDM) {
-                    await reply(sock, msg, `🚫 *Access Denied*\n_You've been restricted from TAM AI._\n_Contact the owner if this is a mistake._`);
-                }
                 return;
             }
 
@@ -971,6 +946,13 @@ async function startAssistant() {
             const effectiveMsg     = unwrapMessage(msg);
             const isJidMentioned   = (effectiveMsg?.extendedTextMessage?.contextInfo?.mentionedJid || []).includes(ownerJid);
             const shouldRespond    = hasTag || isJidMentioned;
+
+            // Show "recording..." in DMs so the user knows bot is alive
+            if (isDM) {
+                await sock.sendPresenceUpdate('recording', from);
+                await delay(config.recordingDelay);
+                await sock.sendPresenceUpdate('paused', from);
+            }
 
             if (shouldRespond) {
                 if (!isOwner) {
