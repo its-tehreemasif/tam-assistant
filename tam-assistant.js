@@ -212,7 +212,10 @@ _Powered by TAM Tech_ 🚀`;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
+let _starting = false;
 async function startAssistant() {
+    if (_starting) { console.log(chalk.yellow('[TAM] Already starting, skipping duplicate call.')); return; }
+    _starting = true;
     // Load persistent data
     await persistence.load();
     bannedUsers  = persistence.getBanned();
@@ -250,6 +253,7 @@ async function startAssistant() {
 
         if (connection === 'open') {
             console.log(chalk.green('[CONNECTION] Online! TAM Assistant v2.0 is live.'));
+            _starting = false; // unlock so future reconnects can call startAssistant again
             _sockRef = sock;
             initScheduler(sock, ownerJid, () => persistence, () => ai);
             rescheduleAllReminders(sock);
@@ -274,6 +278,7 @@ async function startAssistant() {
             if (shouldReconnect) {
                 // Conflict means another instance is still alive — wait longer before reconnecting
                 const isConflict = reason.toLowerCase().includes('conflict');
+                _starting = false; // unlock before scheduling reconnect
                 await delay(isConflict ? 15000 : 5000);
                 startAssistant();
             }
