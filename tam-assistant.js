@@ -386,17 +386,19 @@ async function startAssistant() {
             const textLower   = text.toLowerCase().trim();
 
             // ─── Rate limiting + auto-ban ─────────────────────────────────────
+            // In groups: silently ignore violations — never spam the group chat
             if (!isOwner && text) {
                 const check = rateLimiter.checkMessage(participant);
                 if (!check.allowed) {
                     if (check.autoban) {
-                        // 3 consecutive violations → temp ban (1 hour)
                         bannedUsers = persistence.getBanned();
                         bannedUsers.add(participant);
                         await persistence.setBanned(bannedUsers);
                         console.log(chalk.red(`[AUTOBAN] ${pushName} (${participant}) auto-banned for spam`));
-                        await reply(sock, msg, `🚫 *Auto-Banned*\n_You've been restricted for excessive spamming._\n_Contact the owner to appeal._`);
-                    } else {
+                        if (isDM) {
+                            await reply(sock, msg, `🚫 *Auto-Banned*\n_You've been restricted for excessive spamming._\n_Contact the owner to appeal._`);
+                        }
+                    } else if (isDM) {
                         await reply(sock, msg, `⏳ *Slow down!*\n_Too many messages. Wait *${check.resetIn}s* before sending more._\n_Warning ${check.violations}/3 — repeated violations will result in a ban._`);
                     }
                     return;
@@ -404,9 +406,12 @@ async function startAssistant() {
             }
 
             // ─── Ban check ────────────────────────────────────────────────────
+            // In groups: silently ignore banned users — never reply publicly
             bannedUsers = persistence.getBanned();
             if (bannedUsers.has(participant) && !isOwner) {
-                await reply(sock, msg, `🚫 *Access Denied*\n_You've been restricted from TAM AI._\n_Contact the owner if this is a mistake._`);
+                if (isDM) {
+                    await reply(sock, msg, `🚫 *Access Denied*\n_You've been restricted from TAM AI._\n_Contact the owner if this is a mistake._`);
+                }
                 return;
             }
 
@@ -966,12 +971,6 @@ async function startAssistant() {
             const effectiveMsg     = unwrapMessage(msg);
             const isJidMentioned   = (effectiveMsg?.extendedTextMessage?.contextInfo?.mentionedJid || []).includes(ownerJid);
             const shouldRespond    = hasTag || isJidMentioned;
-
-            if (isDM) {
-                await sock.sendPresenceUpdate('recording', from);
-                await delay(config.recordingDelay);
-                await sock.sendPresenceUpdate('paused', from);
-            }
 
             if (shouldRespond) {
                 if (!isOwner) {
