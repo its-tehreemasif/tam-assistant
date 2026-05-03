@@ -287,8 +287,20 @@ async function startAssistant() {
 
     // ─── Message Handler ──────────────────────────────────────────────────────
     sock.ev.on('messages.upsert', async (chatUpdate) => {
+        // Guard: if a newer socket has taken over, discard events from this old one
+        if (sock !== _sockRef) return;
         try {
             const msg = chatUpdate.messages[0];
+            if (!msg) return;
+
+            // DEBUG — remove once self-chat is confirmed working
+            if (msg.key.fromMe) {
+                console.log(chalk.cyan('[DEBUG selfchat]'), JSON.stringify({
+                    remoteJid: msg.key.remoteJid,
+                    hasDeviceSent: !!msg.message?.deviceSentMessage,
+                    msgType: msg.message ? Object.keys(msg.message)[0] : 'none'
+                }));
+            }
 
             // normalizeJid strips device suffix (e.g. 923...:1@s.whatsapp.net → 923...@s.whatsapp.net)
             const normalizeJid = (jid) => {
