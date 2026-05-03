@@ -217,8 +217,9 @@ _Powered by TAM Tech_ 🚀`;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-let _starting       = false;
-let _reconnectTimer = null;  // single pending reconnect — cancelled if socket opens successfully
+let _starting            = false;
+let _reconnectTimer      = null;   // single pending reconnect — cancelled if socket opens successfully
+let _processStartupSent  = false;  // true after startup msg sent once this process — never re-sends on conflict reconnects
 async function startAssistant() {
     if (_starting) { console.log(chalk.yellow('[TAM] Already starting, skipping duplicate call.')); return; }
     _starting = true;
@@ -266,19 +267,23 @@ async function startAssistant() {
             initScheduler(sock, ownerJid, () => persistence, () => ai);
             rescheduleAllReminders(sock);
 
-            // Send startup ping to Note to Self — delete the previous one first (key is persisted to survive restarts)
-            try {
-                const prevKey = persistence.getStartupMsgKey();
-                if (prevKey) {
-                    try { await sock.sendMessage(ownerJid, { delete: prevKey }); } catch {}
-                    await persistence.setStartupMsgKey(null);
+            // Send startup ping — only ONCE per process (conflict reconnects do NOT re-send)
+            // Previous process's message is deleted using the persisted key from Gist
+            if (!_processStartupSent) {
+                _processStartupSent = true;
+                try {
+                    const prevKey = persistence.getStartupMsgKey();
+                    if (prevKey) {
+                        try { await sock.sendMessage(ownerJid, { delete: prevKey }); } catch {}
+                        await persistence.setStartupMsgKey(null);
+                    }
+                    const sent = await sock.sendMessage(ownerJid, {
+                        text: `✅ *TAM is online*\n_Send !ping to confirm I can read your messages._`
+                    });
+                    if (sent?.key) await persistence.setStartupMsgKey(sent.key);
+                } catch (e) {
+                    console.error(chalk.red('[STARTUP MSG ERROR]'), e.message);
                 }
-                const sent = await sock.sendMessage(ownerJid, {
-                    text: `✅ *TAM is online*\n_${wasConnected ? 'Reconnected after a drop.' : 'Send !ping to confirm I can read your messages.'}_`
-                });
-                if (sent?.key) await persistence.setStartupMsgKey(sent.key);
-            } catch (e) {
-                console.error(chalk.red('[STARTUP MSG ERROR]'), e.message);
             }
 
             if (wasConnected) {
@@ -323,15 +328,6 @@ async function startAssistant() {
         try {
             const msg = chatUpdate.messages[0];
             if (!msg) return;
-
-            // DEBUG — remove once self-chat is confirmed working
-            if (msg.key.fromMe) {
-                console.log(chalk.cyan('[DEBUG selfchat]'), JSON.stringify({
-                    remoteJid: msg.key.remoteJid,
-                    hasDeviceSent: !!msg.message?.deviceSentMessage,
-                    msgType: msg.message ? Object.keys(msg.message)[0] : 'none'
-                }));
-            }
 
             // normalizeJid strips device suffix (e.g. 923...:1@s.whatsapp.net → 923...@s.whatsapp.net)
             const normalizeJid = (jid) => {
