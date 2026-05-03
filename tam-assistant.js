@@ -217,9 +217,8 @@ _Powered by TAM Tech_ 🚀`;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-let _starting          = false;
-let _reconnectTimer    = null;  // single pending reconnect — cancelled if socket opens successfully
-let _lastStartupMsgKey = null;  // key of last "TAM is online" message — deleted before sending the next
+let _starting       = false;
+let _reconnectTimer = null;  // single pending reconnect — cancelled if socket opens successfully
 async function startAssistant() {
     if (_starting) { console.log(chalk.yellow('[TAM] Already starting, skipping duplicate call.')); return; }
     _starting = true;
@@ -267,16 +266,17 @@ async function startAssistant() {
             initScheduler(sock, ownerJid, () => persistence, () => ai);
             rescheduleAllReminders(sock);
 
-            // Send startup ping to Note to Self — delete the previous one first so there's never a pile-up
+            // Send startup ping to Note to Self — delete the previous one first (key is persisted to survive restarts)
             try {
-                if (_lastStartupMsgKey) {
-                    await sock.sendMessage(ownerJid, { delete: _lastStartupMsgKey });
-                    _lastStartupMsgKey = null;
+                const prevKey = persistence.getStartupMsgKey();
+                if (prevKey) {
+                    try { await sock.sendMessage(ownerJid, { delete: prevKey }); } catch {}
+                    await persistence.setStartupMsgKey(null);
                 }
                 const sent = await sock.sendMessage(ownerJid, {
                     text: `✅ *TAM is online*\n_${wasConnected ? 'Reconnected after a drop.' : 'Send !ping to confirm I can read your messages.'}_`
                 });
-                _lastStartupMsgKey = sent?.key || null;
+                if (sent?.key) await persistence.setStartupMsgKey(sent.key);
             } catch (e) {
                 console.error(chalk.red('[STARTUP MSG ERROR]'), e.message);
             }
