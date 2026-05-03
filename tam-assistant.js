@@ -107,9 +107,9 @@ async function reply(sock, msg, text) {
     console.log(chalk.blue(`[REPLY] Sending to ${to}: "${String(text).substring(0, 60)}"`));
     try {
         if (msg.key.id?.startsWith('DASH_')) {
-            await sock.sendMessage(to, { text });
+            await sock.sendMessage(to, { text, ai: true });
         } else {
-            await sock.sendMessage(to, { text }, { quoted: msg });
+            await sock.sendMessage(to, { text, ai: true }, { quoted: msg });
         }
     } catch (e) {
         console.error(chalk.red(`[REPLY ERROR] ${e.message}`));
