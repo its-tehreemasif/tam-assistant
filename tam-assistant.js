@@ -212,7 +212,8 @@ _Powered by TAM Tech_ 🚀`;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-let _starting = false;
+let _starting       = false;
+let _reconnectTimer = null; // single pending reconnect — cancelled if socket opens successfully
 async function startAssistant() {
     if (_starting) { console.log(chalk.yellow('[TAM] Already starting, skipping duplicate call.')); return; }
     _starting = true;
@@ -253,8 +254,10 @@ async function startAssistant() {
 
         if (connection === 'open') {
             console.log(chalk.green('[CONNECTION] Online! TAM Assistant v2.0 is live.'));
-            _starting = false; // unlock so future reconnects can call startAssistant again
-            _sockRef = sock;
+            // Cancel any pending reconnect — this socket made it through successfully
+            if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
+            _starting = false;
+            _sockRef  = sock;
             initScheduler(sock, ownerJid, () => persistence, () => ai);
             rescheduleAllReminders(sock);
 
@@ -279,13 +282,15 @@ async function startAssistant() {
             }
 
             if (shouldReconnect) {
-                // Only reconnect if this was the most-recently-active socket.
-                // Stale sockets (already replaced by a newer one) should NOT spawn another reconnect.
                 const isConflict = reason.toLowerCase().includes('conflict');
-                _starting = false; // unlock before scheduling reconnect
-                await delay(isConflict ? 15000 : 5000);
-                // Double-check: only reconnect if no other socket took over during the delay
-                if (!_sockRef) startAssistant();
+                _starting = false; // unlock so the scheduled startAssistant can proceed
+                // Cancel any existing pending reconnect before scheduling a new one
+                if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
+                _reconnectTimer = setTimeout(() => {
+                    _reconnectTimer = null;
+                    // Only reconnect if no socket has taken over during the wait
+                    if (!_sockRef) startAssistant();
+                }, isConflict ? 15000 : 5000);
             }
         }
     });
