@@ -309,15 +309,17 @@ async function startAssistant() {
             };
 
             // Key multidevice insight:
-            //   • msg.message.deviceSentMessage  → sent BY the primary phone (user typing)
-            //   • no deviceSentMessage, fromMe   → sent BY this Baileys session (bot's own replies)
-            // Self-chat = primary phone sent a message to its own number (Note to Self)
+            //   • fromMe=true, remoteJid=ownerJid, NO deviceSentMessage → Note to Self (self-chat)
+            //   • fromMe=true, remoteJid=group, HAS deviceSentMessage   → owner typed in a group
+            //   • fromMe=true, remoteJid=contact, no deviceSentMessage  → bot's own outgoing reply → DROP
+            //   • fromMe=true, remoteJid=contact, HAS deviceSentMessage → owner DMing someone → DROP
             const isFromPrimaryPhone = !!msg.message?.deviceSentMessage;
-            const isSelfChat = isFromPrimaryPhone && normalizeJid(msg.key.remoteJid) === ownerJid;
+            const isSelfChat         = msg.key.fromMe && normalizeJid(msg.key.remoteJid) === ownerJid;
+            const fromIsGroup        = msg.key.remoteJid?.endsWith('@g.us');
 
-            // Drop bot's own outgoing replies (fromMe but NOT typed on primary phone)
-            // Let through: primary-phone messages to self (self-chat) AND primary-phone messages in groups (owner commands)
-            if (!msg.message || (msg.key.fromMe && !isFromPrimaryPhone)) return;
+            // Keep: self-chat (Note to Self) and owner commands sent in groups
+            // Drop: bot's own outgoing DM replies and owner messages to other contacts
+            if (!msg.message || (msg.key.fromMe && !isSelfChat && !(isFromPrimaryPhone && fromIsGroup))) return;
 
             const from        = msg.key.remoteJid;
             // Skip all non-human sources:
