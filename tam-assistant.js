@@ -103,11 +103,17 @@ async function react(sock, msg, emoji) {
 }
 
 async function reply(sock, msg, text) {
-    // Dashboard-injected messages: send plain (no quote, no invalid key reference)
-    if (msg.key.id?.startsWith('DASH_')) {
-        await sock.sendMessage(msg.key.remoteJid, { text });
-    } else {
-        await sock.sendMessage(msg.key.remoteJid, { text, ai: true }, { quoted: msg });
+    const to = msg.key.remoteJid;
+    console.log(chalk.blue(`[REPLY] Sending to ${to}: "${String(text).substring(0, 60)}"`));
+    try {
+        if (msg.key.id?.startsWith('DASH_')) {
+            await sock.sendMessage(to, { text });
+        } else {
+            await sock.sendMessage(to, { text }, { quoted: msg });
+        }
+    } catch (e) {
+        console.error(chalk.red(`[REPLY ERROR] ${e.message}`));
+        throw e;
     }
 }
 
@@ -409,6 +415,7 @@ async function startAssistant() {
                 return;
             }
 
+            console.log(chalk.cyan(`[EXTRACTED] fromMe=${msg.key.fromMe} isSelf=${isSelfChat} text="${text.substring(0,60)}" participant=${participant}`));
             if (!text) return;
 
             // =================================================================
