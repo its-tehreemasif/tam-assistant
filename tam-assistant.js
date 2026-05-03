@@ -74,15 +74,25 @@ async function bootstrapSession() {
 // Unwrap deviceSentMessage — primary phone messages arrive at linked Render
 // device wrapped in this envelope; bot's own outgoing messages do NOT.
 function unwrapMessage(msg) {
-    return msg.message?.deviceSentMessage?.message || msg.message;
+    return msg?.message?.deviceSentMessage?.message || msg?.message || {};
 }
 
 function extractText(msg) {
     try {
-        const m    = unwrapMessage(msg);
-        const type = Object.keys(m)[0];
-        const c    = m[type];
-        return m.conversation || c?.text || c?.caption || m.extendedTextMessage?.text || '';
+        // Try direct fields first (normal incoming messages)
+        const raw = msg.message || {};
+        if (raw.conversation) return raw.conversation;
+        if (raw.extendedTextMessage?.text) return raw.extendedTextMessage.text;
+        if (raw.imageMessage?.caption) return raw.imageMessage.caption;
+        if (raw.videoMessage?.caption) return raw.videoMessage.caption;
+        // Fallback: unwrap deviceSentMessage (primary phone messages to self)
+        const inner = raw.deviceSentMessage?.message;
+        if (!inner) return '';
+        return inner.conversation
+            || inner.extendedTextMessage?.text
+            || inner.imageMessage?.caption
+            || inner.videoMessage?.caption
+            || '';
     } catch { return ''; }
 }
 
@@ -883,7 +893,8 @@ async function startAssistant() {
             // AI RESPONSE — fires on wake tags or JID mention
             // =================================================================
             const hasTag           = config.wakeTags.some(t => textLower.includes(t));
-            const isJidMentioned   = (msg.message.extendedTextMessage?.contextInfo?.mentionedJid || []).includes(ownerJid);
+            const effectiveMsg     = unwrapMessage(msg);
+            const isJidMentioned   = (effectiveMsg?.extendedTextMessage?.contextInfo?.mentionedJid || []).includes(ownerJid);
             const shouldRespond    = hasTag || isJidMentioned;
 
             if (isDM) {
