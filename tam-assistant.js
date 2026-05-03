@@ -296,8 +296,9 @@ async function startAssistant() {
             const isFromPrimaryPhone = !!msg.message?.deviceSentMessage;
             const isSelfChat = isFromPrimaryPhone && normalizeJid(msg.key.remoteJid) === ownerJid;
 
-            // Drop everything from the bot itself EXCEPT self-chat messages from the primary phone
-            if (!msg.message || (msg.key.fromMe && !isSelfChat)) return;
+            // Drop bot's own outgoing replies (fromMe but NOT typed on primary phone)
+            // Let through: primary-phone messages to self (self-chat) AND primary-phone messages in groups (owner commands)
+            if (!msg.message || (msg.key.fromMe && !isFromPrimaryPhone)) return;
 
             const from        = msg.key.remoteJid;
             // Skip all non-human sources:
@@ -309,8 +310,10 @@ async function startAssistant() {
             if (from.endsWith('@newsletter')) return;
             if (!from.endsWith('@g.us') && !from.endsWith('@s.whatsapp.net') && !isSelfChat) return;
             const isGroup     = from.endsWith('@g.us');
-            // For self-chat always resolve participant to ownerJid so isOwner = true
-            const participant = isGroup ? msg.key.participant : (isSelfChat ? ownerJid : from);
+            // For self-chat or group messages from primary phone, resolve participant correctly
+            // normalizeJid strips device suffix (e.g. 923...:1@s.whatsapp.net → 923...@s.whatsapp.net)
+            const rawParticipant = isGroup ? msg.key.participant : (isSelfChat ? ownerJid : from);
+            const participant    = normalizeJid(rawParticipant) || rawParticipant;
             const pushName    = msg.pushName || 'User';
             const isOwner     = participant === ownerJid;
             const isDM        = !isGroup;
