@@ -272,7 +272,9 @@ async function startAssistant() {
             }
 
             if (shouldReconnect) {
-                await delay(5000);
+                // Conflict means another instance is still alive — wait longer before reconnecting
+                const isConflict = reason.toLowerCase().includes('conflict');
+                await delay(isConflict ? 15000 : 5000);
                 startAssistant();
             }
         }
@@ -1121,6 +1123,16 @@ app.get('/health', (req, res) => {
 });
 
 app.listen(PORT, () => console.log(chalk.yellow(`[SERVER] Dashboard on port ${PORT}`)));
+
+// ─── Global crash guards ───────────────────────────────────────────────────────
+// Baileys fires unhandled rejections (e.g. retry-request on a closed socket).
+// Without these, Node exits and Render restarts → conflict loop.
+process.on('uncaughtException', (err) => {
+    console.error(chalk.red('[UNCAUGHT EXCEPTION]'), err.message);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error(chalk.red('[UNHANDLED REJECTION]'), reason?.message || reason);
+});
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 startAssistant().catch(console.error);
