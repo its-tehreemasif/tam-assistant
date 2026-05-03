@@ -271,16 +271,21 @@ async function startAssistant() {
             const reason         = lastDisconnect?.error?.message || `Code ${code}`;
             console.log(chalk.red(`[CONNECTION] Closed. Reason: ${reason}. Reconnect: ${shouldReconnect}`));
 
+            // If this is still the active socket, clear it so the handler guard drops further events
+            if (_sockRef === sock) _sockRef = null;
+
             if (wasConnected && shouldReconnect) {
                 try { await sendDisconnectAlert(sock, ownerJid, reason); } catch {}
             }
 
             if (shouldReconnect) {
-                // Conflict means another instance is still alive — wait longer before reconnecting
+                // Only reconnect if this was the most-recently-active socket.
+                // Stale sockets (already replaced by a newer one) should NOT spawn another reconnect.
                 const isConflict = reason.toLowerCase().includes('conflict');
                 _starting = false; // unlock before scheduling reconnect
                 await delay(isConflict ? 15000 : 5000);
-                startAssistant();
+                // Double-check: only reconnect if no other socket took over during the delay
+                if (!_sockRef) startAssistant();
             }
         }
     });
