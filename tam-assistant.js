@@ -502,7 +502,7 @@ async function startAssistant() {
             if (textLower.startsWith('!vision')) {
                 console.log(chalk.green(`[VISION] Request from ${pushName}`));
                 await react(sock, msg, '⚡');
-                await sock.sendPresenceUpdate('recording', from);
+                if (isDM) await sock.sendPresenceUpdate('recording', from);
 
                 const userQuestion = text.replace(/^!vision\s*/i, '').trim();
                 const result       = await analyzeImage(sock, msg, userQuestion);
@@ -531,7 +531,7 @@ async function startAssistant() {
                     await reply(sock, msg, `❌ *Vision Error*\n\n${result.error}`);
                 }
 
-                await sock.sendPresenceUpdate('paused', from);
+                if (isDM) await sock.sendPresenceUpdate('paused', from);
                 return;
             }
 
@@ -786,7 +786,7 @@ async function startAssistant() {
                 const lang     = parts.substring(0, spaceIdx);
                 const toTranslate = parts.substring(spaceIdx + 1).trim();
                 await react(sock, msg, '🌐');
-                await sock.sendPresenceUpdate('recording', from);
+                if (isDM) await sock.sendPresenceUpdate('recording', from);
                 const tKey   = participant + '_translate';
                 const result = await ai.chat(tKey, `Translate the following text to ${lang}. Return ONLY the translated text, nothing else:\n\n"${toTranslate}"`);
                 ai.resetConversation(tKey);
@@ -794,7 +794,7 @@ async function startAssistant() {
                     ? `🌐 *Translated to ${lang}:*\n\n${result.message}`
                     : `❌ *Translation failed.* Try again.`
                 );
-                await sock.sendPresenceUpdate('paused', from);
+                if (isDM) await sock.sendPresenceUpdate('paused', from);
                 return;
             }
 
@@ -823,7 +823,7 @@ async function startAssistant() {
             // =================================================================
             if (textLower === '!qod') {
                 await react(sock, msg, '✨');
-                await sock.sendPresenceUpdate('recording', from);
+                if (isDM) await sock.sendPresenceUpdate('recording', from);
                 const qKey   = participant + '_qod';
                 const result = await ai.chat(qKey, 'Give me one powerful motivational quote with author name. Format exactly: "Quote" — Author. Nothing else.');
                 ai.resetConversation(qKey);
@@ -831,7 +831,7 @@ async function startAssistant() {
                     ? `✨ *Quote of the Day*\n\n${result.message}`
                     : `❌ *Could not fetch a quote.*`
                 );
-                await sock.sendPresenceUpdate('paused', from);
+                if (isDM) await sock.sendPresenceUpdate('paused', from);
                 return;
             }
 
@@ -859,7 +859,7 @@ async function startAssistant() {
             if (textLower.startsWith('!weather')) {
                 const city = text.replace(/^!weather\s*/i, '').trim() || 'Karachi';
                 await react(sock, msg, '🌤');
-                await sock.sendPresenceUpdate('recording', from);
+                if (isDM) await sock.sendPresenceUpdate('recording', from);
                 try {
                     const res = await axios.get(
                         `https://wttr.in/${encodeURIComponent(city)}?format=j1`,
@@ -888,7 +888,7 @@ async function startAssistant() {
                 } catch {
                     await reply(sock, msg, `❌ *Weather unavailable for "${city}"*\n_Check the city name and try again._`);
                 }
-                await sock.sendPresenceUpdate('paused', from);
+                if (isDM) await sock.sendPresenceUpdate('paused', from);
                 return;
             }
 
