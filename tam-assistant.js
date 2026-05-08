@@ -67,9 +67,13 @@ const logger       = pino({ level: 'silent' });
 // ─── Suppress Baileys/libsignal internal session noise ────────────────────────
 // These messages come from libsignal/session_cipher.js directly to stdout and
 // are harmless — Baileys automatically recovers from them. They just flood logs.
-const _NOISE = /Session error|Bad MAC|Closing open session|Closing session.*SessionEntry|Removing old closed session/;
+// IMPORTANT: Baileys prints "Closing session" and "Failed to decrypt" through
+// console.log (not warn/error), so we must patch all three.
+const _NOISE = /Session error|Bad MAC|Closing open session|Closing session.*SessionEntry|Removing old closed session|Failed to decrypt/;
+const _origLog   = console.log.bind(console);
 const _origWarn  = console.warn.bind(console);
 const _origError = console.error.bind(console);
+console.log   = (...a) => { if (!_NOISE.test(String(a[0]))) _origLog(...a); };
 console.warn  = (...a) => { if (!_NOISE.test(String(a[0]))) _origWarn(...a); };
 console.error = (...a) => { if (!_NOISE.test(String(a[0]))) _origError(...a); };
 
@@ -496,7 +500,9 @@ async function startAssistant() {
             const rawParticipant = isGroup ? msg.key.participant : (isSelfChat ? ownerJid : from);
             const participant    = normalizeJid(rawParticipant) || rawParticipant;
             const pushName    = msg.pushName || 'User';
-            const isOwner     = participant === ownerJid;
+            // isOwner must cover BOTH phone JID and LID — in groups the owner's
+            // participant arrives as the LID (226074646597725@lid) not the phone JID
+            const isOwner     = participant === ownerJid || (_ownerLid && participant === _ownerLid);
             const isDM        = !isGroup;
             const text        = extractText(msg);
             const textLower   = text.toLowerCase().trim();
@@ -1077,7 +1083,10 @@ async function startAssistant() {
             // =================================================================
             const hasTag           = config.wakeTags.some(t => textLower.includes(t));
             const effectiveMsg     = unwrapMessage(msg);
-            const isJidMentioned   = (effectiveMsg?.extendedTextMessage?.contextInfo?.mentionedJid || []).includes(ownerJid);
+            // mentionedJid entries may carry device suffixes (e.g. 923...:5@s.whatsapp.net)
+            // so normalise each before comparing to ownerJid (stripped phone JID)
+            const mentionedJids    = effectiveMsg?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const isJidMentioned   = mentionedJids.some(jid => normalizeJid(jid) === ownerJid);
             const shouldRespond    = hasTag || isJidMentioned;
 
             // Show "recording..." in DMs so the user knows bot is alive
