@@ -355,12 +355,32 @@ async function startAssistant() {
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         // Guard: if a newer socket has taken over, discard events from this old one
         if (sock !== _sockRef) return;
-        // Only process new real-time messages — skip history sync replays
-        if (chatUpdate.type !== 'notify') return;
-        try {
-            const msg = chatUpdate.messages[0];
-            if (!msg) return;
 
+        const msg = chatUpdate.messages[0];
+        if (!msg) return;
+
+        // Baileys message types:
+        //   'notify' — new incoming message (standard DMs, group messages)
+        //   'append' — outgoing message sent by this device OR a message synced from
+        //              another device (e.g. owner typing in Note to Self on their phone)
+        //
+        // Note to Self messages sent FROM the primary phone arrive as 'append' on linked
+        // devices (the bot). We allow recent append messages that are fromMe+self-chat so
+        // the owner's commands in Note to Self are processed. All other append events
+        // (history sync, old messages) are dropped via the 90-second recency check.
+        if (chatUpdate.type !== 'notify') {
+            if (chatUpdate.type === 'append' && msg.key.fromMe) {
+                const ts = Number(msg.messageTimestamp || 0) * 1000;
+                const age = Date.now() - ts;
+                if (age > 90000) return; // older than 90s → history replay, skip
+                console.log(chalk.gray(`[MSG-APPEND] fromMe append age=${Math.round(age/1000)}s remote=${msg.key.remoteJid?.split('@')[1]}`));
+                // fall through to process this recent self-chat command
+            } else {
+                return;
+            }
+        }
+
+        try {
             // Skip echoes of messages the bot itself sent — prevents infinite AI loops
             // where bot replies to ownerJid come back as isSelfChat=true and get re-processed
             if (msg.key.fromMe && _botSentMsgIds.has(msg.key.id)) return;
