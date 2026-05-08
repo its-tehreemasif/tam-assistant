@@ -50,6 +50,9 @@ let activeReminders = new Map(); // id -> timeoutHandle
 // Bot socket ref — set once Baileys connects, used by dashboard /cmd endpoint
 let _sockRef     = null;
 let _ownerJidRef = null;
+// Owner's LID (Linked ID) — newer WhatsApp uses this for Note to Self instead of phone JID.
+// Populated at connection time from sock.user.lid.
+let _ownerLid    = null;
 
 // Track IDs of every message the bot itself sends so we can skip their echoes.
 // Without this, bot replies to ownerJid come back as isSelfChat=true and the bot
@@ -282,6 +285,16 @@ async function startAssistant() {
             if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
             _starting = false;
             _sockRef  = sock;
+
+            // Learn owner's LID — newer WhatsApp uses @lid JIDs for Note to Self instead of @s.whatsapp.net
+            if (sock.user?.lid) {
+                const raw = sock.user.lid;
+                // Strip device suffix: "226074646597725.0:11@lid" → "226074646597725.0@lid"
+                _ownerLid = raw.includes(':')
+                    ? raw.split(':')[0] + '@' + raw.split('@')[1]
+                    : raw;
+                console.log(chalk.cyan(`[TAM] Owner LID: ${_ownerLid}`));
+            }
             initScheduler(sock, ownerJid, () => persistence, () => ai);
             rescheduleAllReminders(sock);
 
@@ -352,26 +365,38 @@ async function startAssistant() {
             // where bot replies to ownerJid come back as isSelfChat=true and get re-processed
             if (msg.key.fromMe && _botSentMsgIds.has(msg.key.id)) return;
 
-            // normalizeJid strips device suffix (e.g. 923...:1@s.whatsapp.net → 923...@s.whatsapp.net)
+            // normalizeJid strips device suffix while preserving the correct domain.
+            // e.g. 923...:1@s.whatsapp.net → 923...@s.whatsapp.net
+            //      226074646597725.0:11@lid → 226074646597725.0@lid   (LID — Note to Self on newer WhatsApp)
             const normalizeJid = (jid) => {
                 if (!jid) return jid;
-                return jid.includes(':') ? jid.split(':')[0] + '@s.whatsapp.net' : jid;
+                if (!jid.includes(':')) return jid;
+                const [user, rest] = jid.split(':');
+                const domain = rest?.includes('@') ? '@' + rest.split('@')[1] : '@s.whatsapp.net';
+                return user + domain;
             };
 
             // Key multidevice insight:
-            //   • fromMe=true, remoteJid=ownerJid, NO deviceSentMessage → Note to Self (self-chat)
-            //   • fromMe=true, remoteJid=group, HAS deviceSentMessage   → owner typed in a group
-            //   • fromMe=true, remoteJid=contact, no deviceSentMessage  → bot's own outgoing reply → DROP
-            //   • fromMe=true, remoteJid=contact, HAS deviceSentMessage → owner DMing someone → DROP
+            //   • fromMe=true, remoteJid=ownerJid(@s.whatsapp.net), no deviceSentMessage → Note to Self
+            //   • fromMe=true, remoteJid=ownerLid(@lid),             no deviceSentMessage → Note to Self (newer WA)
+            //   • fromMe=true, remoteJid=group,    HAS deviceSentMessage → owner typed in group
+            //   • fromMe=true, remoteJid=contact,  no deviceSentMessage  → bot's own reply → DROP
+            //   • fromMe=true, remoteJid=contact,  HAS deviceSentMessage → owner DMing someone → DROP
             const isFromPrimaryPhone = !!msg.message?.deviceSentMessage;
-            const isSelfChat         = msg.key.fromMe && normalizeJid(msg.key.remoteJid) === ownerJid;
+            const normalizedRemote   = normalizeJid(msg.key.remoteJid);
+            const isSelfChat         = msg.key.fromMe && (
+                normalizedRemote === ownerJid ||
+                (_ownerLid && normalizedRemote === _ownerLid)
+            );
             const fromIsGroup        = msg.key.remoteJid?.endsWith('@g.us');
 
             // Keep: self-chat (Note to Self) and owner commands sent in groups
             // Drop: bot's own outgoing DM replies and owner messages to other contacts
             if (!msg.message || (msg.key.fromMe && !isSelfChat && !(isFromPrimaryPhone && fromIsGroup))) return;
 
-            const from        = msg.key.remoteJid;
+            // For self-chat, always use phone-number JID for replies so sock.sendMessage works
+            // regardless of whether the incoming remoteJid was @s.whatsapp.net or @lid
+            const from = isSelfChat ? ownerJid : msg.key.remoteJid;
             // Skip all non-human sources:
             // - Channels/newsletters (any format: @newsletter, @lid, numeric-only @g.us that are channels)
             // - Broadcast lists, status updates
