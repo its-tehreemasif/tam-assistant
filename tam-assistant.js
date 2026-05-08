@@ -265,7 +265,13 @@ async function startAssistant() {
             keys: makeCacheableSignalKeyStore(state.keys, logger)
         },
         browser: Browsers.ubuntu('Chrome'),
-        syncFullHistory: false
+        syncFullHistory: false,
+        // Required for session recovery after reconnects — without this Baileys cannot
+        // re-establish Signal Protocol sessions and all incoming messages arrive with
+        // msg.message = null (Bad MAC / decryption failure).
+        getMessage: async () => ({ conversation: '' }),
+        // Reduce unnecessary traffic on free-tier
+        generateHighQualityLinkPreview: false,
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -381,6 +387,11 @@ async function startAssistant() {
         }
 
         try {
+            // ─── Diagnostic: log every event so we can see what's arriving ────
+            const _dbgRemote = msg.key.remoteJid?.split('@')[1] || '?';
+            const _dbgHasMsg = !!msg.message;
+            console.log(chalk.gray(`[UPSERT] type=${chatUpdate.type} fromMe=${msg.key.fromMe} remote=@${_dbgRemote} hasMsg=${_dbgHasMsg}`));
+
             // Skip echoes of messages the bot itself sent — prevents infinite AI loops
             // where bot replies to ownerJid come back as isSelfChat=true and get re-processed
             if (msg.key.fromMe && _botSentMsgIds.has(msg.key.id)) return;
@@ -412,7 +423,11 @@ async function startAssistant() {
 
             // Keep: self-chat (Note to Self) and owner commands sent in groups
             // Drop: bot's own outgoing DM replies and owner messages to other contacts
-            if (!msg.message || (msg.key.fromMe && !isSelfChat && !(isFromPrimaryPhone && fromIsGroup))) return;
+            if (!msg.message) {
+                console.log(chalk.red(`[DROP] msg.message=null — Bad MAC / decryption failure for ${msg.key.remoteJid}`));
+                return;
+            }
+            if (msg.key.fromMe && !isSelfChat && !(isFromPrimaryPhone && fromIsGroup)) return;
 
             // For self-chat, always use phone-number JID for replies so sock.sendMessage works
             // regardless of whether the incoming remoteJid was @s.whatsapp.net or @lid
