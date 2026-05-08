@@ -1165,14 +1165,37 @@ app.post('/cmd', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', uptime: Date.now() - startTime, version: '2.0.0' });
+    res.json({
+        status: 'ok',
+        uptime: Date.now() - startTime,
+        version: '2.0.0',
+        connected: !!_sockRef
+    });
 });
 
-app.listen(PORT, () => console.log(chalk.yellow(`[SERVER] Dashboard on port ${PORT}`)));
+app.listen(PORT, () => {
+    console.log(chalk.yellow(`[SERVER] Dashboard on port ${PORT}`));
+
+    // ─── Keep-alive: prevent Render free tier from sleeping ─────────────────
+    // Render suspends the process after ~15 min of no HTTP traffic.
+    // We self-ping the health endpoint every 14 min to stay awake.
+    const SELF_URL = process.env.RENDER_EXTERNAL_URL;
+    if (SELF_URL) {
+        console.log(chalk.cyan(`[KEEPALIVE] Self-ping active → ${SELF_URL}/health every 14 min`));
+        setInterval(async () => {
+            try {
+                await axios.get(`${SELF_URL}/health`, { timeout: 10000 });
+                console.log(chalk.gray(`[KEEPALIVE] ✅ Server is awake (${new Date().toLocaleTimeString('en-PK', { timeZone: 'Asia/Karachi' })})`));
+            } catch (e) {
+                console.error(chalk.yellow(`[KEEPALIVE] ⚠️ Ping failed: ${e.message}`));
+            }
+        }, 14 * 60 * 1000);
+    } else {
+        console.log(chalk.yellow('[KEEPALIVE] RENDER_EXTERNAL_URL not set — self-ping disabled (local dev mode)'));
+    }
+});
 
 // ─── Global crash guards ───────────────────────────────────────────────────────
-// Baileys fires unhandled rejections (e.g. retry-request on a closed socket).
-// Without these, Node exits and Render restarts → conflict loop.
 process.on('uncaughtException', (err) => {
     console.error(chalk.red('[UNCAUGHT EXCEPTION]'), err.message);
 });
