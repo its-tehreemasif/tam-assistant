@@ -51,6 +51,12 @@ let activeReminders = new Map(); // id -> timeoutHandle
 let _sockRef     = null;
 let _ownerJidRef = null;
 
+// Track IDs of every message the bot itself sends so we can skip their echoes.
+// Without this, bot replies to ownerJid come back as isSelfChat=true and the bot
+// tries to AI-respond to its own messages → infinite loop.
+const _botSentMsgIds = new Set();
+setInterval(() => _botSentMsgIds.clear(), 10 * 60 * 1000); // flush every 10 min
+
 const SESSION_PATH = './session_assistant';
 const logger       = pino({ level: 'silent' });
 
@@ -115,11 +121,14 @@ async function reply(sock, msg, text) {
     const to = msg.key.remoteJid;
     console.log(chalk.blue(`[REPLY] Sending to ${to}: "${String(text).substring(0, 60)}"`));
     try {
+        let sent;
         if (msg.key.id?.startsWith('DASH_')) {
-            await sock.sendMessage(to, { text });
+            sent = await sock.sendMessage(to, { text });
         } else {
-            await sock.sendMessage(to, { text }, { quoted: msg });
+            sent = await sock.sendMessage(to, { text }, { quoted: msg });
         }
+        // Track the sent ID so the echo that comes back is ignored
+        if (sent?.key?.id) _botSentMsgIds.add(sent.key.id);
     } catch (e) {
         console.error(chalk.red(`[REPLY ERROR] ${e.message}`));
         throw e;
@@ -289,6 +298,7 @@ async function startAssistant() {
                     const sent = await sock.sendMessage(ownerJid, {
                         text: `✅ *TAM is online*\n_Send !ping to confirm I can read your messages._`
                     });
+                    if (sent?.key?.id) _botSentMsgIds.add(sent.key.id);
                     if (sent?.key) await persistence.setStartupMsgKey(sent.key);
                 } catch (e) {
                     console.error(chalk.red('[STARTUP MSG ERROR]'), e.message);
@@ -337,6 +347,10 @@ async function startAssistant() {
         try {
             const msg = chatUpdate.messages[0];
             if (!msg) return;
+
+            // Skip echoes of messages the bot itself sent — prevents infinite AI loops
+            // where bot replies to ownerJid come back as isSelfChat=true and get re-processed
+            if (msg.key.fromMe && _botSentMsgIds.has(msg.key.id)) return;
 
             // normalizeJid strips device suffix (e.g. 923...:1@s.whatsapp.net → 923...@s.whatsapp.net)
             const normalizeJid = (jid) => {
