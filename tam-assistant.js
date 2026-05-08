@@ -54,6 +54,15 @@ let _ownerJidRef = null;
 const SESSION_PATH = './session_assistant';
 const logger       = pino({ level: 'silent' });
 
+// ─── Suppress Baileys/libsignal internal session noise ────────────────────────
+// These messages come from libsignal/session_cipher.js directly to stdout and
+// are harmless — Baileys automatically recovers from them. They just flood logs.
+const _NOISE = /Session error|Bad MAC|Closing open session|Closing session.*SessionEntry|Removing old closed session/;
+const _origWarn  = console.warn.bind(console);
+const _origError = console.error.bind(console);
+console.warn  = (...a) => { if (!_NOISE.test(String(a[0]))) _origWarn(...a); };
+console.error = (...a) => { if (!_NOISE.test(String(a[0]))) _origError(...a); };
+
 // ─── Session Bootstrap ────────────────────────────────────────────────────────
 async function bootstrapSession() {
     if (!fs.existsSync(SESSION_PATH)) fs.mkdirSync(SESSION_PATH);
@@ -1178,18 +1187,18 @@ app.listen(PORT, () => {
 
     // ─── Keep-alive: prevent Render free tier from sleeping ─────────────────
     // Render suspends the process after ~15 min of no HTTP traffic.
-    // We self-ping the health endpoint every 14 min to stay awake.
+    // We self-ping the health endpoint every 5 min to stay awake.
     const SELF_URL = process.env.RENDER_EXTERNAL_URL;
     if (SELF_URL) {
-        console.log(chalk.cyan(`[KEEPALIVE] Self-ping active → ${SELF_URL}/health every 14 min`));
+        console.log(chalk.cyan(`[KEEPALIVE] Self-ping active → ${SELF_URL}/health every 5 min`));
         setInterval(async () => {
             try {
                 await axios.get(`${SELF_URL}/health`, { timeout: 10000 });
-                console.log(chalk.gray(`[KEEPALIVE] ✅ Server is awake (${new Date().toLocaleTimeString('en-PK', { timeZone: 'Asia/Karachi' })})`));
+                console.log(chalk.gray(`[KEEPALIVE] ✅ Awake (${new Date().toLocaleTimeString('en-PK', { timeZone: 'Asia/Karachi' })})`));
             } catch (e) {
                 console.error(chalk.yellow(`[KEEPALIVE] ⚠️ Ping failed: ${e.message}`));
             }
-        }, 14 * 60 * 1000);
+        }, 5 * 60 * 1000);
     } else {
         console.log(chalk.yellow('[KEEPALIVE] RENDER_EXTERNAL_URL not set — self-ping disabled (local dev mode)'));
     }
