@@ -48,8 +48,9 @@ let bannedUsers, imageContext, stats;
 let activeReminders = new Map(); // id -> timeoutHandle
 
 // Bot socket ref — set once Baileys connects, used by dashboard /cmd endpoint
-let _sockRef     = null;
-let _ownerJidRef = null;
+let _sockRef              = null;
+let _ownerJidRef          = null;
+let _sessionSaveInterval  = null;
 // Owner's LID (Linked ID) — newer WhatsApp uses this for Note to Self instead of phone JID.
 // Populated at connection time from sock.user.lid.
 let _ownerLid    = null;
@@ -73,17 +74,59 @@ console.warn  = (...a) => { if (!_NOISE.test(String(a[0]))) _origWarn(...a); };
 console.error = (...a) => { if (!_NOISE.test(String(a[0]))) _origError(...a); };
 
 // ─── Session Bootstrap ────────────────────────────────────────────────────────
+// Restores the full Baileys session (creds + ALL Signal key files) from Gist.
+// Without Signal keys, every incoming message fails MAC verification → null message → ignored.
 async function bootstrapSession() {
-    if (!fs.existsSync(SESSION_PATH)) fs.mkdirSync(SESSION_PATH);
+    fs.ensureDirSync(SESSION_PATH);
+
+    // Priority 1: restore full session (creds + Signal keys) from Gist
+    try {
+        const sessionData = await persistence.getSessionData();
+        if (sessionData && Object.keys(sessionData).length > 0) {
+            let count = 0;
+            for (const [filename, content] of Object.entries(sessionData)) {
+                const filePath = path.join(SESSION_PATH, filename);
+                fs.writeFileSync(filePath, typeof content === 'string' ? content : JSON.stringify(content));
+                count++;
+            }
+            console.log(chalk.green(`[AUTH] ✅ Restored ${count} session files from Gist (Signal keys included)`));
+            return;
+        }
+    } catch (e) {
+        console.error(chalk.yellow('[AUTH] Could not load session from Gist:'), e.message);
+    }
+
+    // Priority 2: fallback — restore only creds.json from SESSION_ID env var (legacy)
     const credsFile = path.join(SESSION_PATH, 'creds.json');
     const sid = config.sessionId || process.env.SESSION_ID;
     if (sid && sid.length > 50 && !fs.existsSync(credsFile)) {
         try {
             fs.writeFileSync(credsFile, Buffer.from(sid, 'base64').toString('utf-8'));
-            console.log(chalk.green('[AUTH] Session injected.'));
+            console.log(chalk.yellow('[AUTH] ⚠️  Only creds.json restored (no Signal keys) — Bad MAC likely until session rebuilds'));
         } catch {
             console.log(chalk.red('[AUTH] Invalid session. Falling back to QR.'));
         }
+    }
+}
+
+// ─── Save full session to Gist ─────────────────────────────────────────────────
+async function saveSessionToGist() {
+    try {
+        const files = fs.readdirSync(SESSION_PATH);
+        const sessionData = {};
+        for (const f of files) {
+            const fp = path.join(SESSION_PATH, f);
+            if (fs.statSync(fp).isFile() && f.endsWith('.json')) {
+                try { sessionData[f] = JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch {}
+            }
+        }
+        const count = Object.keys(sessionData).length;
+        if (count > 0) {
+            await persistence.setSessionData(sessionData);
+            console.log(chalk.gray(`[AUTH] Session saved to Gist (${count} files)`));
+        }
+    } catch (e) {
+        console.error(chalk.yellow('[AUTH] Session save failed:'), e.message);
     }
 }
 
@@ -291,6 +334,13 @@ async function startAssistant() {
             if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
             _starting = false;
             _sockRef  = sock;
+
+            // Save full session to Gist immediately after connect, then every 3 min
+            // This ensures Signal keys survive Render restarts (fixes Bad MAC / null-message bug)
+            saveSessionToGist();
+            if (!_sessionSaveInterval) {
+                _sessionSaveInterval = setInterval(saveSessionToGist, 3 * 60 * 1000);
+            }
 
             // Learn owner's LID — newer WhatsApp uses @lid JIDs for Note to Self instead of @s.whatsapp.net
             if (sock.user?.lid) {
