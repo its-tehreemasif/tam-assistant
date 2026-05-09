@@ -321,7 +321,12 @@ async function startAssistant() {
         generateHighQualityLinkPreview: false,
     });
 
-    sock.ev.on('creds.update', saveCreds);
+    // Save credentials to disk (Baileys built-in)
+    // Also save full session to Gist so Signal keys survive Render restarts
+    sock.ev.on('creds.update', () => {
+        saveCreds();
+        saveSessionToGist();
+    });
 
     const ownerJid = config.ownerNumber + '@s.whatsapp.net';
     _ownerJidRef   = ownerJid;
@@ -1079,7 +1084,9 @@ async function startAssistant() {
             }
 
             // =================================================================
-            // AI RESPONSE — fires on wake tags or JID mention
+            // AI RESPONSE
+            // • Owner DMs / Note to Self → respond to EVERY message (no @TAM needed)
+            // • Groups / non-owner DMs   → require @TAM / wake tag / JID mention
             // =================================================================
             const hasTag           = config.wakeTags.some(t => textLower.includes(t));
             const effectiveMsg     = unwrapMessage(msg);
@@ -1087,14 +1094,8 @@ async function startAssistant() {
             // so normalise each before comparing to ownerJid (stripped phone JID)
             const mentionedJids    = effectiveMsg?.extendedTextMessage?.contextInfo?.mentionedJid || [];
             const isJidMentioned   = mentionedJids.some(jid => normalizeJid(jid) === ownerJid);
-            const shouldRespond    = hasTag || isJidMentioned;
-
-            // Show "recording..." in DMs so the user knows bot is alive
-            if (isDM) {
-                await sock.sendPresenceUpdate('recording', from);
-                await delay(config.recordingDelay);
-                await sock.sendPresenceUpdate('paused', from);
-            }
+            // Owner DMs and Note to Self always get AI — no @TAM prefix needed
+            const shouldRespond    = (isDM && isOwner) || hasTag || isJidMentioned;
 
             if (shouldRespond) {
                 if (!isOwner) {
@@ -1107,9 +1108,10 @@ async function startAssistant() {
 
                 console.log(chalk.cyan(`[AI] Responding to ${pushName}`));
                 await react(sock, msg, '⚡');
-                await sock.sendPresenceUpdate('recording', from);
+                if (isDM) await sock.sendPresenceUpdate('recording', from);
 
                 let userMessage = text.replace(/@\S+/g, '').trim();
+                if (!userMessage) userMessage = text; // fallback if entire text was @mentions
 
                 // Inject image/voice context if fresh
                 imageContext      = persistence.getImageContext();
@@ -1128,7 +1130,7 @@ async function startAssistant() {
                     await reply(sock, msg, `❌ *AI Error*\n\n_${aiResponse.error}_\n_Please try again._`);
                 }
 
-                await sock.sendPresenceUpdate('paused', from);
+                if (isDM) await sock.sendPresenceUpdate('paused', from);
             }
 
         } catch (e) {
@@ -1304,6 +1306,36 @@ app.post('/cmd', (req, res) => {
     // Fire it through the normal message handler
     _sockRef.ev.emit('messages.upsert', { messages: [fakeMsg], type: 'notify' });
     res.json({ ok: true });
+});
+
+// ─── Session Reset ─────────────────────────────────────────────────────────────
+// Wipes session files + Gist session, forces QR re-pair on next reconnect.
+// Use this when the bot can't decrypt messages (Bad MAC / stale session).
+app.post('/reset-session', async (req, res) => {
+    if (!isAuthenticated(req)) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    try {
+        // 1. Clear Gist session so restart doesn't reload stale keys
+        await persistence.setSessionData({});
+        // 2. Wipe local session files
+        if (fs.existsSync(SESSION_PATH)) {
+            const files = fs.readdirSync(SESSION_PATH);
+            for (const f of files) {
+                try { fs.unlinkSync(path.join(SESSION_PATH, f)); } catch {}
+            }
+        }
+        // 3. Disconnect — bot will reconnect and show QR code in Render logs
+        if (_sockRef) {
+            _sockRef = null;
+            _ownerLid = null;
+            if (_sessionSaveInterval) { clearInterval(_sessionSaveInterval); _sessionSaveInterval = null; }
+        }
+        _starting = false;
+        setTimeout(() => startAssistant(), 3000);
+        console.log(chalk.red('[SESSION] ⚠️  Session reset! Scan QR code from Render logs to re-pair.'));
+        res.json({ ok: true, message: 'Session cleared. Bot will show QR code in Render logs — scan it with WhatsApp.' });
+    } catch (e) {
+        res.json({ ok: false, error: e.message });
+    }
 });
 
 app.get('/health', (req, res) => {
