@@ -131,15 +131,34 @@ async function bootstrapSession() {
         console.error(chalk.yellow('[AUTH] Could not load session from Gist:'), e.message);
     }
 
-    // Priority 2: fallback — restore only creds.json from SESSION_ID env var (legacy)
-    const credsFile = path.join(SESSION_PATH, 'creds.json');
+    // Priority 2: fallback — restore session from SESSION_ID env var (can be full session object as base64)
     const sid = config.sessionId || process.env.SESSION_ID;
-    if (sid && sid.length > 50 && !fs.existsSync(credsFile)) {
+    if (sid && sid.length > 50) {
         try {
-            fs.writeFileSync(credsFile, Buffer.from(sid, 'base64').toString('utf-8'));
-            console.log(chalk.yellow('[AUTH] ⚠️  Only creds.json restored (no Signal keys) — Bad MAC likely until session rebuilds'));
-        } catch {
-            console.log(chalk.red('[AUTH] Invalid session. Falling back to QR.'));
+            const decoded = Buffer.from(sid, 'base64').toString('utf-8');
+            const sessionObj = JSON.parse(decoded);
+            
+            // If it's a full session object with multiple keys
+            if (Object.keys(sessionObj).length > 1 || sessionObj.creds) {
+                let count = 0;
+                for (const [filename, content] of Object.entries(sessionObj)) {
+                    const filePath = path.join(SESSION_PATH, `${filename}.json`);
+                    fs.writeFileSync(filePath, typeof content === 'string' ? content : JSON.stringify(content));
+                    count++;
+                }
+                console.log(chalk.green(`[AUTH] ✅ Restored ${count} session files from SESSION_ID`));
+                return;
+            }
+            
+            // Legacy fallback: just creds.json
+            const credsFile = path.join(SESSION_PATH, 'creds.json');
+            if (!fs.existsSync(credsFile)) {
+                fs.writeFileSync(credsFile, decoded);
+                console.log(chalk.yellow('[AUTH] ⚠️  Only creds.json restored (no Signal keys) — Session will rebuild'));
+            }
+        } catch (e) {
+            console.error(chalk.red('[AUTH] Failed to parse SESSION_ID:'), e.message);
+            console.log(chalk.red('[AUTH] SESSION_ID must be valid base64-encoded JSON. Falling back to QR.'));
         }
     }
 }
