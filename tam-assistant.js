@@ -1,9 +1,17 @@
 /**
  * ╔═══════════════════════════════════════════════════════════╗
- * ║           TAM PERSONAL ASSISTANT v2.0                       ║
+ * ║           TAM PERSONAL ASSISTANT v2.1                       ║
  * ║              Powered by TAM Tech                          ║
  * ╚═══════════════════════════════════════════════════════════╝
  */
+
+// ⚠️ CRITICAL: Global crypto polyfill for Node.js environments (Render, etc.)
+// Required by Baileys for WhatsApp encryption/decryption
+const crypto = require('crypto');
+if (!global.crypto) global.crypto = crypto;
+if (!global.crypto.subtle && crypto.webcrypto) {
+    global.crypto.subtle = crypto.webcrypto.subtle;
+}
 
 const {
     default: makeWASocket,
@@ -18,7 +26,6 @@ const {
 const pino       = require('pino');
 const axios      = require('axios');
 const express    = require('express');
-const crypto     = require('crypto');
 const app        = express();
 app.use(express.urlencoded({ extended: false }));
 const PORT       = process.env.PORT || 3000;
@@ -329,7 +336,7 @@ async function startAssistant() {
     stats        = persistence.getStats();
 
     await bootstrapSession();
-    console.log(chalk.cyan('\n[TAM] Starting TAM Personal Assistant v2.0...'));
+    console.log(chalk.cyan('\n[TAM] Starting TAM Personal Assistant v2.1 (RENDER-FIXED)...'));
 
     const { version }          = await fetchLatestBaileysVersion();
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_PATH);
@@ -382,7 +389,7 @@ async function startAssistant() {
         const { connection, lastDisconnect } = update;
 
         if (connection === 'open') {
-            console.log(chalk.green('[CONNECTION] Online! TAM Assistant v2.0 is live.'));
+            console.log(chalk.green('[CONNECTION] Online! TAM Assistant v2.1 (RENDER-FIXED) is live.'));
             // Cancel any pending reconnect — this socket made it through successfully
             if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
             _starting = false;
