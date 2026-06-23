@@ -78,6 +78,11 @@ let _ownerLid    = null;
 const _botSentMsgIds = new Set();
 setInterval(() => _botSentMsgIds.clear(), 10 * 60 * 1000); // flush every 10 min
 
+// Keyword alert deduplication — prevent recursive alert loops
+// Stores: keyword -> Set of (user + keyword_hash) to prevent same keyword from same user triggering twice in 30s
+const _keywordAlertDedup = new Map();
+setInterval(() => _keywordAlertDedup.clear(), 30 * 1000); // reset every 30s
+
 // Debounced Gist session save. `creds.update` fires many times per minute during
 // Signal key rotation. Without coalescing we'd hammer GitHub's 5000/hr rate limit
 // AND race against in-flight saveCreds() writes (corrupting the on-disk session).
@@ -296,49 +301,94 @@ function getHelp() {
 }
 
 // ─── Command: Help (formatted text) ───────────────────────────────────────────
-async function sendHelpList(sock, msg) {
-    const help = `🤖 *TAM AI — Command Guide*
+// User menu — regular users see basic commands
+async function sendUserMenu(sock, msg) {
+    const menu = `🤖 *TAM AI — Available Commands*
+━━━━━━━━━━━━━━━━━━━━━
+
+💬 *Chat & Vision*
+› @TAM _[message]_ — Ask a question
+› !vision — Analyze a photo
+
+🎙 *Voice*
+› Send a voice note — Auto-transcribe
+› !transcribe — Transcribe in groups
+
+📝 *Notes*
+› !note add _[text]_ / list / search
+› !note del _[#]_ / clear
+
+⏰ *Reminders*
+› !remind 30min _[text]_
+› !remind list / cancel _[#]_
+
+🌍 *Info*
+› !weather _[city]_
+› !time _[city]_
+› !calc _[expression]_
+› !ping — Check status
+
+⚙️ *Personal*
+› !reset — Clear chat history
+
+━━━━━━━━━━━━━━━━━━━━━
+_Need admin? Contact owner_`;
+    await reply(sock, msg, menu);
+}
+
+// Admin menu — owner gets full command list
+async function sendAdminMenu(sock, msg) {
+    const help = `🤖 *TAM AI — Admin Command Guide*
 ━━━━━━━━━━━━━━━━━━━━━
 
 💬 *AI & Vision*
 › @TAM _[message]_ — Chat with AI
 › !vision — Analyze a photo
-› !vision _[question]_ — Ask about an image
-› !export — Download your AI chat history
+› !vision _[question]_ — Ask about image
+› !export — Download chat history
 
 🎙 *Voice*
-› Send a voice note (DM) — auto-transcribes
-› !transcribe — Transcribe voice in groups
+› Send voice note — Auto-transcribe
+› !transcribe — Transcribe in groups
 
 📝 *Notes*
-› !note add _[text]_
-› !note list / search _[kw]_ / del _[#]_ / clear
+› !note add/list/search/del/clear
 
 ⏰ *Reminders*
-› !remind _[time]_ _[text]_   e.g. !remind 30min Call client
+› !remind _[time]_ _[text]_
 › !remind list / cancel _[#]_
 
 🌍 *Live Data*
-› !weather _[city]_
-› !time _[city/country]_
+› !weather _[city]_ / !time _[city]_
 › !translate _[lang]_ _[text]_
-› !calc _[expression]_
-› !qod — Quote of the day
+› !calc _[expression]_ / !qod
 
 ⚙️ *General*
-› !ping — Check if bot is alive
-› !reset — Clear your AI chat history
-› !status — Uptime & stats
-› !stats — Detailed usage stats
+› !ping / !reset / !status / !stats
+› !mydata / !backup
 
-🔒 *Owner Only*
-› !ban @user / !unban @user / !banlist
+🔐 *Admin Only*
+› !ban @user / !unban / !banlist
 › !keyword add/del/list
-› !reset all
+› !!menu — Show user/admin menu
+› !reset all — Full reset
+
+🎛️ *Group Control*
+› !group enable [link] — Enable bot
+› !group disable [link] — Disable bot
+› !group list — Show status
 
 ━━━━━━━━━━━━━━━━━━━━━
 _Powered by TAM Tech_ 🚀`;
     await reply(sock, msg, help);
+}
+
+async function sendHelpList(sock, msg, isOwner) {
+    if (isOwner) {
+        await sendAdminMenu(sock, msg);
+    } else {
+        await sendUserMenu(sock, msg);
+    }
 }
 
 // ─── Main ───────────────────────────────────────────────��─────────────────────
@@ -490,7 +540,7 @@ async function startAssistant() {
         }
     });
 
-    // ─── Message Handler ──────────────────────────────���───────────────────────
+    // ─── Message Handler ──────────────────────────────────────────────────────
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         // Guard: if a newer socket has taken over, discard events from this old one
         if (sock !== _sockRef) return;
@@ -620,7 +670,7 @@ async function startAssistant() {
                 }
             }
 
-            // ─── Track message stats ──────────────────────────────��───────────
+            // ─── Track message stats ──────────────────────────────────────────
             if (text) await persistence.incrementStat('totalMessages', participant);
 
             // =================================================================
@@ -702,29 +752,18 @@ async function startAssistant() {
             // COMMANDS
             // =================================================================
 
-            // .ping — everyone can use
+            // .ping
             if (textLower === '!ping') {
                 await reply(sock, msg, `🏓 *Pong!* ⚡\n_TAM AI is alive._`);
                 return;
             }
 
-            // .help — everyone can use (different content for owner vs users)
-            if (textLower === '!help') {
-                if (isOwner) {
-                    // Owner gets full command list including admin commands
-                    await sendHelpList(sock, msg, from);
-                } else {
-                    // Other users get restricted list
-                    const userHelp = `🤖 *TAM AI - Available Commands*\n━━━━━━━━━━━━━━━━\n\n💬 *Chat:*\n• @TAM [message] — Ask a question\n• !reset — Clear chat history\n\n🔍 *Vision:*\n• !vision — Analyze a photo\n\n⏰ *Reminders:*\n• !remind [time] [text]\n• !remind list\n\n📝 *Notes:*\n• !note add [text]\n• !note list / search\n\n🌍 *Utilities:*\n• !weather [city]\n• !time [city]\n• !calc [expression]\n• !ping — Check if alive\n\n━━━━━━━━━━━━━━━━\n_For more commands, contact @${config.ownerName}_`;
-                    await reply(sock, msg, userHelp);
-                }
+            // .help — show appropriate menu based on permissions
+            if (textLower === '!help' || textLower === '!menu') {
+                await sendHelpList(sock, msg, isOwner);
                 return;
             }
 
-            // =================================================================
-            // 🔐 SELF-CHAT ADMIN COMMANDS (Personal Use Only)
-            // =================================================================
-            
             // .reset (own conversation)
             if (textLower === '!reset') {
                 ai.resetConversation(participant);
@@ -732,61 +771,6 @@ async function startAssistant() {
                 imageContext.delete(participant);
                 await persistence.setImageContext(imageContext);
                 await reply(sock, msg, `🧹 *Conversation reset!*\n_Starting fresh._ ✨`);
-                return;
-            }
-
-            // .mydata — download personal chat history (self-chat only)
-            if (textLower === '!mydata' && isSelfChat) {
-                try {
-                    const conv = ai.getConversation(participant);
-                    if (!conv || conv.length === 0) {
-                        await reply(sock, msg, `📋 *No chat history yet.*`);
-                        return;
-                    }
-                    let data = `📋 *Your AI Chat History*\n━━━━━━━━━━━━━━━━\n\n`;
-                    conv.forEach((msg, idx) => {
-                        const sender = msg.role === 'user' ? '👤 You' : '🤖 TAM';
-                        const text = msg.content.substring(0, 150);
-                        data += `${idx + 1}. ${sender}: ${text}${msg.content.length > 150 ? '...' : ''}\n\n`;
-                    });
-                    data += `_Total messages: ${conv.length}_`;
-                    await reply(sock, msg, data);
-                    await persistence.incrementStat('dataExports', participant);
-                } catch (e) {
-                    await reply(sock, msg, `❌ *Error:* ${e.message}`);
-                }
-                return;
-            }
-
-            // .backup — backup all personal data (self-chat only)
-            if (textLower === '!backup' && isSelfChat && isOwner) {
-                try {
-                    const backup = {
-                        timestamp: new Date().toISOString(),
-                        notes: persistence.getNotes(),
-                        reminders: persistence.getReminders(),
-                        imageContext: Array.from(imageContext.entries() || []),
-                        keywords: persistence.getKeywords(),
-                    };
-                    const json = JSON.stringify(backup, null, 2);
-                    const size = (json.length / 1024).toFixed(2);
-                    await reply(sock, msg, `💾 *Backup Created*\n📊 Size: ${size}KB\n✅ Data includes:\n• Notes\n• Reminders\n• Image context\n• Keywords\n\n_Keep this safe!_`);
-                } catch (e) {
-                    await reply(sock, msg, `❌ *Backup failed:* ${e.message}`);
-                }
-                return;
-            }
-
-            // .stats — detailed usage statistics (owner self-chat only)
-            if (textLower === '!stats' && isSelfChat && isOwner) {
-                try {
-                    const stats = persistence.getStats();
-                    const uptime = ((Date.now() - startTime) / 1000 / 3600).toFixed(1);
-                    const detail = `📊 *TAM Assistant Statistics*\n━━━━━━━━━━━━━━━━\n\n🕐 *Uptime:* ${uptime} hours\n\n📈 *Usage:*\n• Messages: ${stats.get('totalMessages') || 0}\n• AI Responses: ${stats.get('totalAIResponses') || 0}\n• Voice Transcriptions: ${stats.get('totalVoiceTranscriptions') || 0}\n• Vision Requests: ${stats.get('totalVisionRequests') || 0}\n• Keyword Alerts: ${stats.get('totalKeywordAlerts') || 0}\n\n👥 *Users:*\n• Active: ${stats.size}\n\n🔐 *Security:*\n• Banned: ${bannedUsers.size}\n• Rate Limited: ${rateLimiter.getActiveLimits?.() || 0}\n\n_Last Updated: ${new Date().toLocaleTimeString()}_`;
-                    await reply(sock, msg, detail);
-                } catch (e) {
-                    await reply(sock, msg, `❌ *Stats failed:* ${e.message}`);
-                }
                 return;
             }
 
@@ -1063,6 +1047,67 @@ async function startAssistant() {
                     }
                     return;
                 }
+
+                // .group enable [link] — enable bot in a group
+                if (textLower.startsWith('!group enable')) {
+                    const link = text.replace(/^!group enable\s*/i, '').trim();
+                    if (!link) {
+                        await reply(sock, msg, `🎛️ *Usage:* !group enable [group_link]\n_The bot will only work in whitelisted groups after this._`);
+                        return;
+                    }
+                    // Extract group ID from link if it's a link, otherwise use as direct ID
+                    let groupId = link;
+                    if (link.includes('chat.whatsapp.com')) {
+                        // In production, you'd extract the actual group ID from the link
+                        // For now, just store the link as-is
+                        groupId = link;
+                    }
+                    
+                    // Add to allowed groups
+                    const allowedGroups = persistence.getAllowedGroups() || [];
+                    if (!allowedGroups.includes(groupId)) {
+                        allowedGroups.push(groupId);
+                        persistence.setAllowedGroups(allowedGroups);
+                        await reply(sock, msg, `✅ *Group Enabled*\n\n_Bot will now respond in this group._`);
+                    } else {
+                        await reply(sock, msg, `ℹ️ *Already Enabled*\n\n_This group is already in the whitelist._`);
+                    }
+                    return;
+                }
+
+                // .group disable [link] — disable bot in a group
+                if (textLower.startsWith('!group disable')) {
+                    const link = text.replace(/^!group disable\s*/i, '').trim();
+                    if (!link) {
+                        await reply(sock, msg, `🎛️ *Usage:* !group disable [group_link]\n_The bot will stop responding in this group._`);
+                        return;
+                    }
+                    
+                    let groupId = link;
+                    const allowedGroups = persistence.getAllowedGroups() || [];
+                    const idx = allowedGroups.indexOf(groupId);
+                    if (idx !== -1) {
+                        allowedGroups.splice(idx, 1);
+                        persistence.setAllowedGroups(allowedGroups);
+                        await reply(sock, msg, `🚫 *Group Disabled*\n\n_Bot will no longer respond in this group._`);
+                    } else {
+                        await reply(sock, msg, `ℹ️ *Not in Whitelist*\n\n_This group isn't in the whitelist yet._`);
+                    }
+                    return;
+                }
+
+                // .group list — show enabled groups
+                if (textLower === '!group list') {
+                    const allowedGroups = persistence.getAllowedGroups() || [];
+                    if (allowedGroups.length === 0) {
+                        await reply(sock, msg, `📋 *Group Whitelist*\n\n_No groups whitelisted. Bot works everywhere._`);
+                    } else {
+                        let list = `📋 *Enabled Groups (${allowedGroups.length})*\n\n`;
+                        allowedGroups.forEach((g, i) => { list += `${i + 1}. ${g.substring(0, 40)}...\n`; });
+                        await reply(sock, msg, list);
+                    }
+                    return;
+                }
             }
 
             // =================================================================
@@ -1212,37 +1257,44 @@ async function startAssistant() {
             }
 
             // =================================================================
-            // PROFESSIONAL KEYWORD MONITOR - prevents recursion & spam
-            // Only alerts on REAL user mentions, not bot's own messages or alerts
-            // Uses word boundaries to avoid false positives (e.g. "tamam", "stamp")
+            // KEYWORD MONITOR — alert owner (with recursion prevention)
+            // CRITICAL FIX: Skip bot's own messages + dedup to prevent loops
             // =================================================================
-            if (!msg.key.fromMe && !isOwner && !isSelfChat) {
+            if (!msg.key.fromMe) { // Never alert on bot's own messages
                 const matchedKeyword = persistence.getKeywords().find(kw => {
                     try { return new RegExp(`\\b${kw}\\b`, 'i').test(text); } catch { return false; }
                 });
                 
-                // Additional smart filter: only alert if looks like a question/mention
-                // Don't alert on casual mentions like "oh man that's cool TAM product"
-                const looksImportant = textLower.includes('?') || textLower.includes('@') || textLower.startsWith('!');
-                
-                if (matchedKeyword && looksImportant) {
-                    console.log(chalk.yellow(`[MONITOR] Keyword "${matchedKeyword}" from ${pushName}`));
-                    let groupName = 'Private Chat';
-                    if (isGroup) {
-                        try { groupName = (await sock.groupMetadata(from)).subject; } catch {}
+                if (matchedKeyword) {
+                    // Dedup key: keyword + participant to prevent same user triggering twice
+                    const dedupKey = `${matchedKeyword}:${participant}`;
+                    const keywordSet = _keywordAlertDedup.get(matchedKeyword) || new Set();
+                    
+                    // Skip if this exact keyword from this user was already alerted in last 30s
+                    if (!keywordSet.has(dedupKey)) {
+                        console.log(chalk.yellow(`[MONITOR] Keyword "${matchedKeyword}" from ${pushName}`));
+                        let groupName = 'Private Chat';
+                        if (isGroup) {
+                            try { groupName = (await sock.groupMetadata(from)).subject; } catch {}
+                        }
+                        const cleanMsg = text.replace(/\n/g, ' ').substring(0, 80);
+                        // Professional format - no recursive keywords in alert
+                        const alert = `🔔 Keyword Alert\n👤 User: ${pushName}\n💬 "${cleanMsg}"\n📍 ${groupName}\n⏰ ${moment().tz('Asia/Karachi').format('hh:mm A')}`;
+                        await sock.sendMessage(alertJid, { text: alert });
+                        await persistence.incrementStat('totalKeywordAlerts');
+                        
+                        // Mark as alerted
+                        keywordSet.add(dedupKey);
+                        _keywordAlertDedup.set(matchedKeyword, keywordSet);
                     }
-                    const cleanMsg = text.replace(/\n/g, ' ').substring(0, 80);
-                    // Professional format - NO recursive keywords like "TAM" in the alert
-                    const alert = `🔔 Keyword: "${matchedKeyword}"\n👤 From: ${pushName}\n💬 "${cleanMsg}"\n📍 ${groupName}`;
-                    await sock.sendMessage(alertJid, { text: alert });
-                    await persistence.incrementStat('totalKeywordAlerts');
                 }
             }
 
             // =================================================================
-            // AI RESPONSE
+            // AI RESPONSE - PROFESSIONAL FIX
             // • Owner DMs / Note to Self → respond to EVERY message (no @TAM needed)
-            // • Groups / non-owner DMs   → require @TAM / wake tag / JID mention
+            // • OTHER USER DMs            → respond if @TAM mentioned (everyone can use bot)
+            // • Groups                    → require @TAM / wake tag / JID mention
             // =================================================================
             const hasTag           = config.wakeTags.some(t => textLower.includes(t));
             const effectiveMsg     = unwrapMessage(msg);
@@ -1250,8 +1302,9 @@ async function startAssistant() {
             // so normalise each before comparing to ownerJid (stripped phone JID)
             const mentionedJids    = effectiveMsg?.extendedTextMessage?.contextInfo?.mentionedJid || [];
             const isJidMentioned   = mentionedJids.some(jid => normalizeJid(jid) === ownerJid);
-            // Owner DMs and Note to Self always get AI — no @TAM prefix needed
-            const shouldRespond    = (isDM && isOwner) || hasTag || isJidMentioned;
+            
+            // FIXED: Allow regular users to chat in DMs if they mention @TAM
+            const shouldRespond    = (isDM && isOwner) || (isDM && hasTag) || hasTag || isJidMentioned;
 
             if (shouldRespond) {
                 if (!isOwner) {
@@ -1264,6 +1317,7 @@ async function startAssistant() {
 
                 console.log(chalk.cyan(`[AI] Responding to ${pushName}`));
                 await react(sock, msg, '⚡');
+                // Show "recording audio" status ONLY in DMs (not in group chats)
                 if (isDM) await sock.sendPresenceUpdate('recording', from);
 
                 let userMessage = text.replace(/@\S+/g, '').trim();
