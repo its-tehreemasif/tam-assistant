@@ -85,8 +85,22 @@ setInterval(() => _keywordAlertDedup.clear(), 30 * 1000); // reset every 30s
 
 // Debounced Gist session save. `creds.update` fires many times per minute during
 // Signal key rotation. Without coalescing we'd hammer GitHub's 5000/hr rate limit
-// AND race against in-flight saveCreds() writes (corrupting the on-disk session).
+// AND race against in-flight saveCreds() writes (corrupting the on-disk session)
 let _gistSaveTimer = null;
+
+// Timeout protection for message handlers to prevent "Waiting for message" state
+function withTimeout(fn, timeoutMs = 8000) {
+    return async function (...args) {
+        return Promise.race([
+            fn(...args),
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Handler timeout')), timeoutMs)
+            )
+        ]).catch(err => {
+            console.error(chalk.red('[HANDLER TIMEOUT]'), err.message);
+        });
+    };
+}
 let _savingSession = false;
 function debouncedSaveSessionToGist() {
     if (_gistSaveTimer) clearTimeout(_gistSaveTimer);
@@ -541,12 +555,16 @@ async function startAssistant() {
     });
 
     // ─── Message Handler ──────────────────────────────────────────────────────
-    sock.ev.on('messages.upsert', async (chatUpdate) => {
-        // Guard: if a newer socket has taken over, discard events from this old one
-        if (sock !== _sockRef) return;
+    sock.ev.on('messages.upsert', (chatUpdate) => {
+        // CRITICAL: Process async in background to prevent "Waiting for message" state
+        // Exit handler immediately, don't await any processing
+        setImmediate(async () => {
+            try {
+                // Guard: if a newer socket has taken over, discard events from this old one
+                if (sock !== _sockRef) return;
 
-        const msg = chatUpdate.messages[0];
-        if (!msg) return;
+                const msg = chatUpdate.messages[0];
+                if (!msg) return;
 
         // Baileys message types:
         //   'notify' — new incoming message (standard DMs, group messages)
@@ -1364,9 +1382,13 @@ async function startAssistant() {
                 });
             }
 
-        } catch (e) {
-            console.error(chalk.red('[ERROR]'), e.message);
-        }
+            } catch (e) {
+                console.error(chalk.red('[ERROR]'), e.message);
+            }
+            } catch (handlerErr) {
+                console.error(chalk.red('[HANDLER ERROR]'), handlerErr.message);
+            }
+        }); // end setImmediate
     });
 }
 
