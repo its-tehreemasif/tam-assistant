@@ -25,6 +25,18 @@ module.exports = {
     ownerTag: '@Taha',
 
     // ═══════════════════════════════════════════════════════════
+    // GROUP ACCESS CONTROL
+    // ═══════════════════════════════════════════════════════════
+    // Empty = Allow bot in ALL groups. If set, ONLY these groups allow bot.
+    // Get group ID: right-click group → Group Info → Look for ID in URL or logs
+    // Format: Comma-separated group JIDs (ending in @g.us)
+    // Example: "120363000000000001@g.us,120363000000000002@g.us"
+    allowedGroups: (process.env.ALLOWED_GROUPS || '').split(',').filter(g => g.trim()),
+    // If true: blocks commands in non-whitelisted groups
+    // If false: allows bot in all groups
+    enforceGroupWhitelist: process.env.ENFORCE_GROUP_WHITELIST === 'true',
+
+    // ═══════════════════════════════════════════════════════════
     // MONITORING & STATUS
     // ═══════════════════════════════════════════════════════════
     keywords: ['Taha', 'taha', 'TAM', 'tam'],

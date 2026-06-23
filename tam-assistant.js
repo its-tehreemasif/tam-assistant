@@ -124,42 +124,42 @@ async function bootstrapSession() {
                 fs.writeFileSync(filePath, typeof content === 'string' ? content : JSON.stringify(content));
                 count++;
             }
-            console.log(chalk.green(`[AUTH] ✅ Restored ${count} session files from Gist (Signal keys included)`));
+            console.log(chalk.green(`[AUTH] ✅ Session restored from Gist (${count} files)`));
             return;
         }
     } catch (e) {
-        console.error(chalk.yellow('[AUTH] Could not load session from Gist:'), e.message);
+        console.error(chalk.yellow('[AUTH] Could not load from Gist:'), e.message);
     }
 
-    // Priority 2: fallback — restore session from SESSION_ID env var (can be full session object as base64)
+    // Priority 2: restore session from SESSION_ID env var (CRITICAL: If set, must load or bot won't work)
     const sid = config.sessionId || process.env.SESSION_ID;
     if (sid && sid.length > 50) {
         try {
             const decoded = Buffer.from(sid, 'base64').toString('utf-8');
             const sessionObj = JSON.parse(decoded);
             
-            // If it's a full session object with multiple keys
-            if (Object.keys(sessionObj).length > 1 || sessionObj.creds) {
+            // Full session object with multiple files (creds + signal keys)
+            if (typeof sessionObj === 'object' && Object.keys(sessionObj).length > 0) {
                 let count = 0;
                 for (const [filename, content] of Object.entries(sessionObj)) {
-                    const filePath = path.join(SESSION_PATH, `${filename}.json`);
+                    const normalizedName = filename.endsWith('.json') ? filename : `${filename}.json`;
+                    const filePath = path.join(SESSION_PATH, normalizedName);
                     fs.writeFileSync(filePath, typeof content === 'string' ? content : JSON.stringify(content));
                     count++;
                 }
-                console.log(chalk.green(`[AUTH] ✅ Restored ${count} session files from SESSION_ID`));
+                console.log(chalk.green(`[AUTH] ✅ Session restored from SESSION_ID (${count} files) — NO QR NEEDED`));
                 return;
             }
-            
-            // Legacy fallback: just creds.json
-            const credsFile = path.join(SESSION_PATH, 'creds.json');
-            if (!fs.existsSync(credsFile)) {
-                fs.writeFileSync(credsFile, decoded);
-                console.log(chalk.yellow('[AUTH] ⚠️  Only creds.json restored (no Signal keys) — Session will rebuild'));
-            }
         } catch (e) {
-            console.error(chalk.red('[AUTH] Failed to parse SESSION_ID:'), e.message);
-            console.log(chalk.red('[AUTH] SESSION_ID must be valid base64-encoded JSON. Falling back to QR.'));
+            console.error(chalk.red('[AUTH] SESSION_ID parse failed:'), e.message);
+            console.error(chalk.red('[AUTH] Bot cannot proceed without valid session. QR pairing required on next restart.'));
         }
+    }
+
+    // If we get here with SESSION_ID set but failed to load, that's a critical error
+    if (sid && sid.length > 50) {
+        console.error(chalk.red('\n[CRITICAL] SESSION_ID is set but could not be loaded. Bot will not function.'));
+        console.error(chalk.red('Please verify SESSION_ID is valid base64-encoded JSON.\n'));
     }
 }
 
@@ -360,12 +360,15 @@ async function startAssistant() {
     const { version }          = await fetchLatestBaileysVersion();
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_PATH);
 
+    // Only show QR code if NO SESSION_ID is provided
+    const hasSessionId = !!(config.sessionId || process.env.SESSION_ID);
+    const shouldPrintQR = !hasSessionId;
+
     const sock = makeWASocket({
         version,
         logger,
-        // Note: deprecated in 6.7.x but still functional. Kept so QR appears in Render logs.
-        // When migrating to Baileys 7.x, switch to sock.requestPairingCode(phoneNumber).
-        printQRInTerminal: true,
+        // Print QR only if no SESSION_ID. If SESSION_ID is set, Baileys will use it directly.
+        printQRInTerminal: shouldPrintQR,
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, logger)
@@ -603,6 +606,18 @@ async function startAssistant() {
             bannedUsers = persistence.getBanned();
             if (bannedUsers.has(participant) && !isOwner) {
                 return;
+            }
+
+            // ─── Group whitelist check ────────────────────────────────────────
+            // RULE: Personal chat (self-chat or DM) = ALWAYS allowed
+            // RULE: Group with whitelist = only if in allowedGroups
+            // RULE: Group without whitelist = check enforceGroupWhitelist flag
+            if (isGroup && config.enforceGroupWhitelist && config.allowedGroups.length > 0) {
+                const groupId = from.trim();
+                if (!config.allowedGroups.some(g => g.trim() === groupId)) {
+                    // Silently ignore commands from non-whitelisted groups
+                    return;
+                }
             }
 
             // ─── Track message stats ──────────────────────────────────────────
