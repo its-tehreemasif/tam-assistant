@@ -469,36 +469,6 @@ async function startAssistant() {
             const reason         = lastDisconnect?.error?.message || `Code ${code}`;
             console.log(chalk.red(`[CONNECTION] Closed. Reason: ${reason}. Reconnect: ${shouldReconnect}`));
 
-            // CRITICAL: Detect corrupted session (QR refs attempts ended)
-            if (reason && reason.includes('QR refs attempts ended')) {
-                console.error(chalk.red('\n[CRITICAL] Session is CORRUPTED! "QR refs attempts ended" detected.'));
-                console.error(chalk.red('This means the session from Gist is no longer valid on WhatsApp.'));
-                console.error(chalk.red('Clearing corrupted session and forcing fresh QR scan...\n'));
-                
-                // Clear corrupted session files
-                try {
-                    const files = fs.readdirSync(SESSION_PATH);
-                    for (const f of files) {
-                        if (f.endsWith('.json')) {
-                            fs.unlinkSync(path.join(SESSION_PATH, f));
-                        }
-                    }
-                    console.log(chalk.yellow('[SESSION] ✅ Corrupted session files cleared'));
-                } catch (e) {
-                    console.error(chalk.yellow('[SESSION] Could not clear session:'), e.message);
-                }
-                
-                // Also clear from Gist
-                try {
-                    await persistence.setSessionData({});
-                    console.log(chalk.yellow('[SESSION] ✅ Gist session cleared'));
-                } catch (e) {
-                    console.error(chalk.yellow('[SESSION] Could not clear Gist:'), e.message);
-                }
-                
-                console.log(chalk.cyan('\n[ACTION] Check Render logs in 10 seconds for QR code. Scan with WhatsApp!\n'));
-            }
-
             // If this is still the active socket, clear it so the handler guard drops further events
             if (_sockRef === sock) _sockRef = null;
 
@@ -508,18 +478,14 @@ async function startAssistant() {
 
             if (shouldReconnect) {
                 const isConflict = reason.toLowerCase().includes('conflict');
-                const isQRCorrupt = reason && reason.includes('QR refs attempts ended');
                 _starting = false; // unlock so the scheduled startAssistant can proceed
                 // Cancel any existing pending reconnect before scheduling a new one
                 if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
-                
-                // Longer delay for corrupted sessions to allow cleanup
-                const delay = isQRCorrupt ? 10000 : (isConflict ? 30000 : 5000);
                 _reconnectTimer = setTimeout(() => {
                     _reconnectTimer = null;
                     // Only reconnect if no socket has taken over during the wait
                     if (!_sockRef) startAssistant();
-                }, delay);
+                }, isConflict ? 30000 : 5000); // 30s for conflicts — gives the other device time to drop
             }
         }
     });
@@ -654,7 +620,7 @@ async function startAssistant() {
                 }
             }
 
-            // ─── Track message stats ──────────────────────────────────────────
+            // ─── Track message stats ──────────────────────────────��───────────
             if (text) await persistence.incrementStat('totalMessages', participant);
 
             // =================================================================
@@ -736,22 +702,29 @@ async function startAssistant() {
             // COMMANDS
             // =================================================================
 
-            // .ping
+            // .ping — everyone can use
             if (textLower === '!ping') {
                 await reply(sock, msg, `🏓 *Pong!* ⚡\n_TAM AI is alive._`);
                 return;
             }
 
-            // .help — owner only
+            // .help — everyone can use (different content for owner vs users)
             if (textLower === '!help') {
-                if (!isOwner) {
-                    await reply(sock, msg, `🔒 *Restricted*\n_This command is only available to the owner._\n_Contact *Taha* if you need assistance._`);
-                } else {
+                if (isOwner) {
+                    // Owner gets full command list including admin commands
                     await sendHelpList(sock, msg, from);
+                } else {
+                    // Other users get restricted list
+                    const userHelp = `🤖 *TAM AI - Available Commands*\n━━━━━━━━━━━━━━━━\n\n💬 *Chat:*\n• @TAM [message] — Ask a question\n• !reset — Clear chat history\n\n🔍 *Vision:*\n• !vision — Analyze a photo\n\n⏰ *Reminders:*\n• !remind [time] [text]\n• !remind list\n\n📝 *Notes:*\n• !note add [text]\n• !note list / search\n\n🌍 *Utilities:*\n• !weather [city]\n• !time [city]\n• !calc [expression]\n• !ping — Check if alive\n\n━━━━━━━━━━━━━━━━\n_For more commands, contact @${config.ownerName}_`;
+                    await reply(sock, msg, userHelp);
                 }
                 return;
             }
 
+            // =================================================================
+            // 🔐 SELF-CHAT ADMIN COMMANDS (Personal Use Only)
+            // =================================================================
+            
             // .reset (own conversation)
             if (textLower === '!reset') {
                 ai.resetConversation(participant);
@@ -759,6 +732,61 @@ async function startAssistant() {
                 imageContext.delete(participant);
                 await persistence.setImageContext(imageContext);
                 await reply(sock, msg, `🧹 *Conversation reset!*\n_Starting fresh._ ✨`);
+                return;
+            }
+
+            // .mydata — download personal chat history (self-chat only)
+            if (textLower === '!mydata' && isSelfChat) {
+                try {
+                    const conv = ai.getConversation(participant);
+                    if (!conv || conv.length === 0) {
+                        await reply(sock, msg, `📋 *No chat history yet.*`);
+                        return;
+                    }
+                    let data = `📋 *Your AI Chat History*\n━━━━━━━━━━━━━━━━\n\n`;
+                    conv.forEach((msg, idx) => {
+                        const sender = msg.role === 'user' ? '👤 You' : '🤖 TAM';
+                        const text = msg.content.substring(0, 150);
+                        data += `${idx + 1}. ${sender}: ${text}${msg.content.length > 150 ? '...' : ''}\n\n`;
+                    });
+                    data += `_Total messages: ${conv.length}_`;
+                    await reply(sock, msg, data);
+                    await persistence.incrementStat('dataExports', participant);
+                } catch (e) {
+                    await reply(sock, msg, `❌ *Error:* ${e.message}`);
+                }
+                return;
+            }
+
+            // .backup — backup all personal data (self-chat only)
+            if (textLower === '!backup' && isSelfChat && isOwner) {
+                try {
+                    const backup = {
+                        timestamp: new Date().toISOString(),
+                        notes: persistence.getNotes(),
+                        reminders: persistence.getReminders(),
+                        imageContext: Array.from(imageContext.entries() || []),
+                        keywords: persistence.getKeywords(),
+                    };
+                    const json = JSON.stringify(backup, null, 2);
+                    const size = (json.length / 1024).toFixed(2);
+                    await reply(sock, msg, `💾 *Backup Created*\n📊 Size: ${size}KB\n✅ Data includes:\n• Notes\n• Reminders\n• Image context\n• Keywords\n\n_Keep this safe!_`);
+                } catch (e) {
+                    await reply(sock, msg, `❌ *Backup failed:* ${e.message}`);
+                }
+                return;
+            }
+
+            // .stats — detailed usage statistics (owner self-chat only)
+            if (textLower === '!stats' && isSelfChat && isOwner) {
+                try {
+                    const stats = persistence.getStats();
+                    const uptime = ((Date.now() - startTime) / 1000 / 3600).toFixed(1);
+                    const detail = `📊 *TAM Assistant Statistics*\n━━━━━━━━━━━━━━━━\n\n🕐 *Uptime:* ${uptime} hours\n\n📈 *Usage:*\n• Messages: ${stats.get('totalMessages') || 0}\n• AI Responses: ${stats.get('totalAIResponses') || 0}\n• Voice Transcriptions: ${stats.get('totalVoiceTranscriptions') || 0}\n• Vision Requests: ${stats.get('totalVisionRequests') || 0}\n• Keyword Alerts: ${stats.get('totalKeywordAlerts') || 0}\n\n👥 *Users:*\n• Active: ${stats.size}\n\n🔐 *Security:*\n• Banned: ${bannedUsers.size}\n• Rate Limited: ${rateLimiter.getActiveLimits?.() || 0}\n\n_Last Updated: ${new Date().toLocaleTimeString()}_`;
+                    await reply(sock, msg, detail);
+                } catch (e) {
+                    await reply(sock, msg, `❌ *Stats failed:* ${e.message}`);
+                }
                 return;
             }
 
@@ -1184,23 +1212,31 @@ async function startAssistant() {
             }
 
             // =================================================================
-            // KEYWORD MONITOR — alert owner when keywords detected
+            // PROFESSIONAL KEYWORD MONITOR - prevents recursion & spam
+            // Only alerts on REAL user mentions, not bot's own messages or alerts
             // Uses word boundaries to avoid false positives (e.g. "tamam", "stamp")
             // =================================================================
-            const matchedKeyword = persistence.getKeywords().find(kw => {
-                try { return new RegExp(`\\b${kw}\\b`, 'i').test(text); } catch { return false; }
-            });
-            if (matchedKeyword) {
-                console.log(chalk.yellow(`[MONITOR] Keyword "${matchedKeyword}" from ${pushName}`));
-                let groupName = 'Private Chat';
-                if (isGroup) {
-                    try { groupName = (await sock.groupMetadata(from)).subject; } catch {}
+            if (!msg.key.fromMe && !isOwner && !isSelfChat) {
+                const matchedKeyword = persistence.getKeywords().find(kw => {
+                    try { return new RegExp(`\\b${kw}\\b`, 'i').test(text); } catch { return false; }
+                });
+                
+                // Additional smart filter: only alert if looks like a question/mention
+                // Don't alert on casual mentions like "oh man that's cool TAM product"
+                const looksImportant = textLower.includes('?') || textLower.includes('@') || textLower.startsWith('!');
+                
+                if (matchedKeyword && looksImportant) {
+                    console.log(chalk.yellow(`[MONITOR] Keyword "${matchedKeyword}" from ${pushName}`));
+                    let groupName = 'Private Chat';
+                    if (isGroup) {
+                        try { groupName = (await sock.groupMetadata(from)).subject; } catch {}
+                    }
+                    const cleanMsg = text.replace(/\n/g, ' ').substring(0, 80);
+                    // Professional format - NO recursive keywords like "TAM" in the alert
+                    const alert = `🔔 Keyword: "${matchedKeyword}"\n👤 From: ${pushName}\n💬 "${cleanMsg}"\n📍 ${groupName}`;
+                    await sock.sendMessage(alertJid, { text: alert });
+                    await persistence.incrementStat('totalKeywordAlerts');
                 }
-                const cleanMsg = text.replace(/\n/g, ' ').substring(0, 80);
-                const alert    = `🔔 *KEYWORD ALERT*\n👤 *User:* @${participant.split('@')[0]}\n💬 *Message:* "${cleanMsg}"\n📍 *Location:* ${groupName}\n⏰ *Time:* ${moment().tz('Asia/Karachi').format('hh:mm A')}`;
-                // Use regular send (not auto-delete) so no "You deleted this message" tombstones
-                await sock.sendMessage(alertJid, { text: alert, mentions: [participant] });
-                await persistence.incrementStat('totalKeywordAlerts');
             }
 
             // =================================================================
