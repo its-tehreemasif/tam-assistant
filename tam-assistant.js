@@ -679,35 +679,31 @@ async function startAssistant() {
             // Groups → only when someone replies to a voice note with .transcribe
             // =================================================================
             if (isVoiceMessage(msg) && isDM) {
-                // Auto-transcribe in DMs only
-                console.log(chalk.magenta(`[VOICE] Auto-transcribing DM voice note from ${pushName}`));
+                console.log(chalk.magenta(`[VOICE] Auto-transcribing from ${pushName}`));
                 await react(sock, msg, '🎙');
-                await sock.sendPresenceUpdate('recording', from);
 
-                // OPTIMIZATION: Process transcription asynchronously to prevent "Waiting for message" state
-                (async () => {
+                setImmediate(async () => {
                     try {
+                        await sock.sendPresenceUpdate('recording', from).catch(() => {});
                         const result = await transcribeVoice(msg, config.aiApiKey);
                         await persistence.incrementStat('totalVoiceTranscriptions', participant);
 
                         if (result.success) {
-                            const durationStr = result.duration ? ` _(${result.duration}s)_` : '';
-                            await reply(sock, msg,
-                                `🎙 *Voice Transcription*${durationStr}\n\n"${result.text}"\n\n_💡 @TAM can answer questions about this._`
-                            );
+                            const durationStr = result.duration ? ` (${result.duration}s)` : '';
+                            await reply(sock, msg, `🎙 "${result.text}"${durationStr}`);
                             imageContext = persistence.getImageContext();
                             imageContext.set(participant, { text: result.text, timestamp: Date.now() });
                             await persistence.setImageContext(imageContext);
                         } else {
-                            await reply(sock, msg, `❌ *Transcription failed*\n_${result.error}_`);
+                            await reply(sock, msg, `❌ Transcription failed`);
                         }
                     } catch (tErr) {
                         console.error(chalk.red('[Transcription Error]'), tErr.message);
-                        await reply(sock, msg, `❌ *Transcription error*\n_${tErr.message}_`).catch(() => {});
+                        await reply(sock, msg, `❌ Error`).catch(() => {});
                     } finally {
                         await sock.sendPresenceUpdate('paused', from).catch(() => {});
                     }
-                })().catch(console.error);
+                });
                 return;
             }
 
@@ -731,34 +727,31 @@ async function startAssistant() {
                     return;
                 }
 
-                console.log(chalk.magenta(`[VOICE] Manual transcribe in group by ${pushName}`));
+                console.log(chalk.magenta(`[VOICE] Manual transcribe by ${pushName}`));
                 await react(sock, msg, '🎙');
-                await sock.sendPresenceUpdate('recording', from);
 
-                // OPTIMIZATION: Process transcription asynchronously to prevent "Waiting for message" state
-                (async () => {
+                setImmediate(async () => {
                     try {
+                        await sock.sendPresenceUpdate('recording', from).catch(() => {});
                         const result = await transcribeVoice(fakeMsg, config.aiApiKey);
                         await persistence.incrementStat('totalVoiceTranscriptions', participant);
 
                         if (result.success) {
-                            const durationStr = result.duration ? ` _(${result.duration}s)_` : '';
-                            await reply(sock, msg,
-                                `🎙 *Voice Transcription*${durationStr}\n\n"${result.text}"\n\n_💡 @TAM can answer questions about this._`
-                            );
+                            const durationStr = result.duration ? ` (${result.duration}s)` : '';
+                            await reply(sock, msg, `🎙 "${result.text}"${durationStr}`);
                             imageContext = persistence.getImageContext();
                             imageContext.set(participant, { text: result.text, timestamp: Date.now() });
                             await persistence.setImageContext(imageContext);
                         } else {
-                            await reply(sock, msg, `❌ *Transcription failed*\n_${result.error}_`);
+                            await reply(sock, msg, `❌ Transcription failed`);
                         }
                     } catch (tErr) {
-                        console.error(chalk.red('[Manual Transcription Error]'), tErr.message);
-                        await reply(sock, msg, `❌ *Transcription error*\n_${tErr.message}_`).catch(() => {});
+                        console.error(chalk.red('[Transcription Error]'), tErr.message);
+                        await reply(sock, msg, `❌ Error`).catch(() => {});
                     } finally {
                         await sock.sendPresenceUpdate('paused', from).catch(() => {});
                     }
-                })().catch(console.error);
+                });
                 return;
             }
 
@@ -794,13 +787,12 @@ async function startAssistant() {
             if (textLower.startsWith('!vision')) {
                 console.log(chalk.green(`[VISION] Request from ${pushName}`));
                 await react(sock, msg, '⚡');
-                if (isDM) await sock.sendPresenceUpdate('recording', from);
 
                 const userQuestion = text.replace(/^!vision\s*/i, '').trim();
                 
-                // OPTIMIZATION: Process vision analysis asynchronously to prevent "Waiting for message" state
-                (async () => {
+                setImmediate(async () => {
                     try {
+                        if (isDM) await sock.sendPresenceUpdate('recording', from).catch(() => {});
                         const result = await analyzeImage(sock, msg, userQuestion);
 
                         if (result.success) {
@@ -810,29 +802,25 @@ async function startAssistant() {
                             await persistence.incrementStat('totalVisionRequests', participant);
 
                             if (result.source === 'groq-vision') {
-                                await reply(sock, msg,
-                                    `🔍 *Vision Analysis*\n\n${result.result}\n\n> 💬 _Ask follow-up questions using @TAM!_`
-                                );
+                                await reply(sock, msg, `🔍 Analysis\n\n${result.result}`);
                             } else {
                                 const aiPrompt = userQuestion
-                                    ? `Image text: "${result.result}"\n\nQuestion: "${userQuestion}"\n\nAnswer thoroughly.`
-                                    : `Image text: "${result.result}"\n\nAnalyze and explain professionally.`;
+                                    ? `Image text: "${result.result}"\n\nQuestion: "${userQuestion}"`
+                                    : `Image text: "${result.result}"`;
                                 const aiResult = await ai.chat(participant, aiPrompt);
                                 await persistence.incrementStat('totalAIResponses', participant);
-                                await reply(sock, msg,
-                                    `🔍 *Vision Analysis*\n\n${aiResult.success ? aiResult.message : result.result}\n\n> 💬 _Ask follow-up questions using @TAM!_`
-                                );
+                                await reply(sock, msg, `🔍 Analysis\n\n${aiResult.success ? aiResult.message : result.result}`);
                             }
                         } else {
-                            await reply(sock, msg, `❌ *Vision Error*\n\n${result.error}`);
+                            await reply(sock, msg, `❌ Vision Error`);
                         }
                     } catch (vErr) {
                         console.error(chalk.red('[Vision Error]'), vErr.message);
-                        await reply(sock, msg, `❌ *Vision analysis failed*\n_${vErr.message}_`).catch(() => {});
+                        await reply(sock, msg, `❌ Error`).catch(() => {});
                     } finally {
                         if (isDM) await sock.sendPresenceUpdate('paused', from).catch(() => {});
                     }
-                })().catch(console.error);
+                });
                 return;
             }
 
@@ -1342,11 +1330,9 @@ async function startAssistant() {
 
                 console.log(chalk.cyan(`[AI] Responding to ${pushName}`));
                 await react(sock, msg, '⚡');
-                // Show "recording audio" status ONLY in DMs (not in group chats)
-                if (isDM) await sock.sendPresenceUpdate('recording', from);
 
                 let userMessage = text.replace(/@\S+/g, '').trim();
-                if (!userMessage) userMessage = text; // fallback if entire text was @mentions
+                if (!userMessage) userMessage = text;
 
                 // Inject image/voice context if fresh
                 imageContext      = persistence.getImageContext();
@@ -1356,25 +1342,26 @@ async function startAssistant() {
                     console.log(chalk.green('[AI] Injecting stored context'));
                 }
 
-                // OPTIMIZATION: Process AI response asynchronously to prevent "Waiting for message" state
-                // This ensures the bot doesn't appear to be stuck to other group members
-                (async () => {
+                // CRITICAL: Exit handler immediately after emoji reaction
+                // This prevents "Waiting for message" state in WhatsApp
+                setImmediate(async () => {
                     try {
+                        if (isDM) await sock.sendPresenceUpdate('recording', from).catch(() => {});
                         const aiResponse = await ai.chat(participant, userMessage);
                         await persistence.incrementStat('totalAIResponses', participant);
 
                         if (aiResponse.success) {
                             await reply(sock, msg, aiResponse.message);
                         } else {
-                            await reply(sock, msg, `❌ *AI Error*\n\n_${aiResponse.error}_\n_Please try again._`);
+                            await reply(sock, msg, `❌ Error. Please try again.`);
                         }
                     } catch (aiErr) {
-                        console.error(chalk.red('[AI Response Error]'), aiErr.message);
-                        await reply(sock, msg, `❌ *Unexpected error*\n_${aiErr.message}_`).catch(() => {});
+                        console.error(chalk.red('[AI Error]'), aiErr.message);
+                        await reply(sock, msg, `❌ Error. Please try again.`).catch(() => {});
                     } finally {
                         if (isDM) await sock.sendPresenceUpdate('paused', from).catch(() => {});
                     }
-                })().catch(console.error);
+                });
             }
 
         } catch (e) {
