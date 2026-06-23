@@ -341,7 +341,7 @@ _Powered by TAM Tech_ 🚀`;
     await reply(sock, msg, help);
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Main ───────────────────────────────────────────────��─────────────────────
 let _starting            = false;
 let _reconnectTimer      = null;   // single pending reconnect — cancelled if socket opens successfully
 let _processStartupSent  = false;  // true after startup msg sent once this process — never re-sends on conflict reconnects
@@ -469,6 +469,36 @@ async function startAssistant() {
             const reason         = lastDisconnect?.error?.message || `Code ${code}`;
             console.log(chalk.red(`[CONNECTION] Closed. Reason: ${reason}. Reconnect: ${shouldReconnect}`));
 
+            // CRITICAL: Detect corrupted session (QR refs attempts ended)
+            if (reason && reason.includes('QR refs attempts ended')) {
+                console.error(chalk.red('\n[CRITICAL] Session is CORRUPTED! "QR refs attempts ended" detected.'));
+                console.error(chalk.red('This means the session from Gist is no longer valid on WhatsApp.'));
+                console.error(chalk.red('Clearing corrupted session and forcing fresh QR scan...\n'));
+                
+                // Clear corrupted session files
+                try {
+                    const files = fs.readdirSync(SESSION_PATH);
+                    for (const f of files) {
+                        if (f.endsWith('.json')) {
+                            fs.unlinkSync(path.join(SESSION_PATH, f));
+                        }
+                    }
+                    console.log(chalk.yellow('[SESSION] ✅ Corrupted session files cleared'));
+                } catch (e) {
+                    console.error(chalk.yellow('[SESSION] Could not clear session:'), e.message);
+                }
+                
+                // Also clear from Gist
+                try {
+                    await persistence.setSessionData({});
+                    console.log(chalk.yellow('[SESSION] ✅ Gist session cleared'));
+                } catch (e) {
+                    console.error(chalk.yellow('[SESSION] Could not clear Gist:'), e.message);
+                }
+                
+                console.log(chalk.cyan('\n[ACTION] Check Render logs in 10 seconds for QR code. Scan with WhatsApp!\n'));
+            }
+
             // If this is still the active socket, clear it so the handler guard drops further events
             if (_sockRef === sock) _sockRef = null;
 
@@ -478,19 +508,23 @@ async function startAssistant() {
 
             if (shouldReconnect) {
                 const isConflict = reason.toLowerCase().includes('conflict');
+                const isQRCorrupt = reason && reason.includes('QR refs attempts ended');
                 _starting = false; // unlock so the scheduled startAssistant can proceed
                 // Cancel any existing pending reconnect before scheduling a new one
                 if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
+                
+                // Longer delay for corrupted sessions to allow cleanup
+                const delay = isQRCorrupt ? 10000 : (isConflict ? 30000 : 5000);
                 _reconnectTimer = setTimeout(() => {
                     _reconnectTimer = null;
                     // Only reconnect if no socket has taken over during the wait
                     if (!_sockRef) startAssistant();
-                }, isConflict ? 30000 : 5000); // 30s for conflicts — gives the other device time to drop
+                }, delay);
             }
         }
     });
 
-    // ─── Message Handler ──────────────────────────────────────────────────────
+    // ─── Message Handler ──────────────────────────────���───────────────────────
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         // Guard: if a newer socket has taken over, discard events from this old one
         if (sock !== _sockRef) return;
@@ -1225,7 +1259,7 @@ async function startAssistant() {
     });
 }
 
-// ─── Dashboard Auth ────────────────────────────────────────────────────────────
+// ─── Dashboard Auth ────────────────────────────────────────────────────────���───
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || 'tam2024';
 const SESSION_SECRET_KEY = process.env.SESSION_SECRET || 'tam-secret-key';
 
