@@ -102,12 +102,14 @@ function withTimeout(fn, timeoutMs = 8000) {
     };
 }
 let _savingSession = false;
+let _gist409Retries = 0;
 function debouncedSaveSessionToGist() {
     if (_gistSaveTimer) clearTimeout(_gistSaveTimer);
     _gistSaveTimer = setTimeout(() => {
         _gistSaveTimer = null;
+        _gist409Retries = 0;
         saveSessionToGist();
-    }, 5000); // 5s after the last creds.update — burst-safe
+    }, 15000); // Increased from 5s to 15s to reduce concurrent write conflicts
 }
 
 const SESSION_PATH = './session_assistant';
@@ -204,6 +206,16 @@ async function saveSessionToGist() {
             console.log(chalk.gray(`[AUTH] Session saved to Gist (${count} files)`));
         }
     } catch (e) {
+        // Handle HTTP 409 Conflict with retry
+        if (e?.response?.status === 409) {
+            _gist409Retries = (_gist409Retries || 0) + 1;
+            if (_gist409Retries <= 2) {
+                console.log(chalk.yellow(`[AUTH] Gist 409 conflict, retrying in 10s (attempt ${_gist409Retries}/2)...`));
+                _savingSession = false;
+                setTimeout(saveSessionToGist, 10000);
+                return;
+            }
+        }
         console.error(chalk.yellow('[AUTH] Session save failed:'), e.message);
     } finally {
         _savingSession = false;
@@ -247,12 +259,8 @@ async function reply(sock, msg, text) {
     const to = msg.key.remoteJid;
     console.log(chalk.blue(`[REPLY] Sending to ${to}: "${String(text).substring(0, 60)}"`));
     try {
-        let sent;
-        if (msg.key.id?.startsWith('DASH_')) {
-            sent = await sock.sendMessage(to, { text });
-        } else {
-            sent = await sock.sendMessage(to, { text }, { quoted: msg });
-        }
+        // Always send without quoting to prevent "Waiting for this message" state
+        const sent = await sock.sendMessage(to, { text });
         // Track the sent ID so the echo that comes back is ignored
         if (sent?.key?.id) _botSentMsgIds.add(sent.key.id);
     } catch (e) {
@@ -431,7 +439,6 @@ async function startAssistant() {
     const sock = makeWASocket({
         version,
         logger,
-        // Print QR only if no SESSION_ID. If SESSION_ID is set, Baileys will use it directly.
         printQRInTerminal: shouldPrintQR,
         auth: {
             creds: state.creds,
@@ -439,16 +446,15 @@ async function startAssistant() {
         },
         browser: Browsers.ubuntu('Chrome'),
         syncFullHistory: false,
-        // Don't compete with the primary phone for "online" status — prevents
-        // presence-update conflicts and reduces the chance of a logout cascade.
         markOnlineOnConnect: false,
-        // Returning undefined lets Baileys use its built-in unavailable-message
-        // handling. Returning { conversation: '' } (the previous code) was actively
-        // harmful: it told peers "the missing message was an empty string", which
-        // corrupts the receiver's Signal ratchet for that conversation.
         getMessage: async (key) => undefined,
-        // Reduce unnecessary traffic on free-tier
         generateHighQualityLinkPreview: false,
+        msgRetryCounterMax: 5,
+        shouldIgnoreJid: (jid) => false,
+        requestTimeoutMs: 15000,
+        connectTimeoutMs: 60000,         // Render cold starts need more time
+        defaultQueryTimeoutMs: 30000,    // Extend Baileys query timeout
+        keepAliveIntervalMs: 15000,      // Keep connection alive
     });
 
     // Save credentials to disk (Baileys built-in)
@@ -1187,7 +1193,7 @@ async function startAssistant() {
             }
 
             // =================================================================
-            // ✨ .QOD — quote of the day on demand
+            // ��� .QOD — quote of the day on demand
             // =================================================================
             if (textLower === '!qod') {
                 await react(sock, msg, '✨');
@@ -1625,9 +1631,13 @@ app.listen(PORT, () => {
 // ─── Global crash guards ───────────────────────────────────────────────────────
 process.on('uncaughtException', (err) => {
     console.error(chalk.red('[UNCAUGHT EXCEPTION]'), err.message);
+    // Don't crash - just log and continue
 });
 process.on('unhandledRejection', (reason) => {
-    console.error(chalk.red('[UNHANDLED REJECTION]'), reason?.message || reason);
+    const msg = reason?.message || String(reason);
+    console.error(chalk.red('[UNHANDLED REJECTION]'), msg);
+    // Don't crash - just log and continue
+    // Common harmless rejections: WebSocket codes 1006, Baileys timeouts, etc.
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
